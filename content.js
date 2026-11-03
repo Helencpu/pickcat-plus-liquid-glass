@@ -884,8 +884,8 @@ function createSettingsPanel() {
                 --glass-card: rgba(255,255,255,0.10);
                 --glass-sheen: rgba(255,255,255,0.24);
                 --glass-border: rgba(255,255,255,0.18);
-                --text-main: #eef1f7;
-                --text-muted: #9aa4b8;
+                --text-main: #f8fafd;
+                --text-muted: #bcc5d8;
                 --border: rgba(255,255,255,0.14);
                 --switch-bg: rgba(120,128,150,0.42);
                 --scroll-thumb: rgba(255,255,255,0.16);
