@@ -1960,7 +1960,7 @@ function createSettingsPanel() {
 // ==========================================
 function loadAllConfigs(callback) {
     chrome.storage.local.get([
-        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor',
+        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo',
         'pickcatHideCat', 'pickcatKitten4', 'pickcatCategoryList', 'pickcatCreationGrid', CLAIMS_KEY
     ], (res) => {
         // 插件租约覆盖：只在内存里生效，不碰用户存的原始值
