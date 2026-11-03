@@ -240,6 +240,24 @@ function applyBackground(bgUrl, bgBase64, maskEnabled) {
     }
 }
 
+// 替换站点左上角 PICKCAT logo：直接换掉品牌链接里的 <img> src
+// 站点是 SPA，logo 可能随路由/主题重渲，所以也挂在 body 变更的 observer 里补一枪
+function applyLogo(logo) {
+    const sel = 'a[href="/"] img[src*="pickcat-logo"], img[src*="pickcat-logo"]';
+    const v = (logo && String(logo).trim()) ? String(logo).trim() : '';
+    document.querySelectorAll(sel).forEach((img) => {
+        if (v) {
+            if (!img.getAttribute('data-pickcat-orig-src')) img.setAttribute('data-pickcat-orig-src', img.src);
+            if (img.src !== v) img.src = v;
+            img.style.objectFit = 'contain';
+        } else if (img.hasAttribute('data-pickcat-orig-src')) {
+            img.src = img.getAttribute('data-pickcat-orig-src');
+            img.removeAttribute('data-pickcat-orig-src');
+            img.style.objectFit = '';
+        }
+    });
+}
+
 function applyHideCat(hide) {
     let style = document.getElementById('pickcat-hide-cat-style');
     if (hide) {
@@ -779,6 +797,7 @@ const CLAIM_MAX_PER_KEY = 3;  // 同一个设置项最多被几个插件争抢
 const CLAIM_KEY_TYPES = {
     pickcatBgUrl: 'text',
     pickcatBgBase64: 'text',
+    pickcatLogo: 'text',
     pickcatMaskEnabled: 'bool',
     pickcatCursor: 'cursor',
     pickcatCustomCursor: 'text',
@@ -1228,6 +1247,10 @@ function createSettingsPanel() {
                         <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.66 0 3-1.34 3-3 0-.55-.45-1-1-1s-1 .45-1 1c0 .55-.45 1-1 1-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7c0 1.1-.9 2-2 2h-1.5c-1.38 0-2.5 1.12-2.5 2.5S14.62 19 16 19h2c1.66 0 3-1.34 3-3a9 9 0 0 0-9-9z"/></svg>
                         <span class="nav-text">外观设置</span>
                     </div>
+                    <div class="nav-item" data-tab="tab-logo">
+                        <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                        <span class="nav-text">站点 Logo</span>
+                    </div>
                     <div class="nav-item" data-tab="tab-typing">
                         <svg viewBox="0 0 24 24"><path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 12H4V7h16v10zm-9-2h2V9h-2v6zm-4 0h2v-4H7v4zm8 0h2v-2h-2v2z"/></svg>
                         <span class="nav-text">输入增强</span>
@@ -1320,6 +1343,27 @@ function createSettingsPanel() {
                             <div class="cursor-item" data-val="custom">✨ 自定义</div>
                         </div>
                         <input type="file" id="customCursorFile" accept="image/png">
+                    </div>
+
+                    <div class="tab-content" id="tab-logo">
+                        <div class="section-title">🪐 自定义站点 Logo</div>
+                        <div class="row-card" style="flex-direction: column; align-items: stretch;">
+                            <div class="input-group">
+                                <input type="text" id="logoInput" placeholder="粘贴图床直链...">
+                                <button id="saveLogoBtn">保存</button>
+                            </div>
+                            <div style="display:flex; gap:8px; margin-top:8px;">
+                                <input type="file" id="logoFileUpload" accept="image/*">
+                                <button id="uploadLogoBtn" class="btn-secondary">📁 上传本地图片</button>
+                                <button id="clearLogoBtn" class="btn-danger">🗑️ 恢复默认</button>
+                            </div>
+                        </div>
+                        <div class="row-card">
+                            <div class="row-info">
+                                <div class="row-title">替换左上角 PICKCAT logo</div>
+                                <div class="row-desc">粘贴图片直链或上传本地图片后自动生效，恢复默认即还原</div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="tab-content" id="tab-typing">
@@ -1555,6 +1599,12 @@ function createSettingsPanel() {
     const uploadBgBtn = shadow.getElementById('uploadBgBtn');
     const clearBgBtn = shadow.getElementById('clearBgBtn');
     const maskToggle = shadow.getElementById('maskToggle');
+
+    const logoInput = shadow.getElementById('logoInput');
+    const saveLogoBtn = shadow.getElementById('saveLogoBtn');
+    const logoFileUpload = shadow.getElementById('logoFileUpload');
+    const uploadLogoBtn = shadow.getElementById('uploadLogoBtn');
+    const clearLogoBtn = shadow.getElementById('clearLogoBtn');
     
     const hideCatToggle = shadow.getElementById('hideCatToggle');
     const kitten4Toggle = shadow.getElementById('kitten4Toggle');
@@ -1577,6 +1627,7 @@ function createSettingsPanel() {
         return [
             { key: 'pickcatBgUrl', els: [bgInput, saveBgBtn, uploadBgBtn] },
             { key: 'pickcatBgBase64', els: [bgInput, saveBgBtn, uploadBgBtn], quiet: true },
+            { key: 'pickcatLogo', els: [logoInput, saveLogoBtn, uploadLogoBtn] },
             { key: 'pickcatMaskEnabled', els: [maskToggle] },
             { key: 'pickcatHideCat', els: [hideCatToggle] },
             { key: 'pickcatKitten4', els: [kitten4Toggle] },
@@ -1647,6 +1698,14 @@ function createSettingsPanel() {
             } else {
                 bgInput.value = '';
                 bgInput.disabled = false;
+            }
+            if (res.pickcatLogo) {
+                const isData = String(res.pickcatLogo).startsWith('data:');
+                logoInput.value = isData ? '已加载本地图片' : res.pickcatLogo;
+                logoInput.disabled = isData;
+            } else {
+                logoInput.value = '';
+                logoInput.disabled = false;
             }
             maskToggle.checked = res.pickcatMaskEnabled === true;
             hideCatToggle.checked = res.pickcatHideCat === true;
@@ -1771,6 +1830,33 @@ function createSettingsPanel() {
         chrome.storage.local.set({ pickcatBgUrl: '', pickcatBgBase64: '' }, () => loadAllConfigs());
     });
 
+    saveLogoBtn.addEventListener('click', () => {
+        if (logoInput.disabled) return alert('当前为本地图片，如需更换请先恢复默认');
+        chrome.storage.local.set({ pickcatLogo: logoInput.value.trim() }, () => loadAllConfigs());
+    });
+    uploadLogoBtn.addEventListener('click', () => logoFileUpload.click());
+    logoFileUpload.addEventListener('change', (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const MAX_WIDTH = 512;
+                let width = img.width, height = img.height;
+                if (width > MAX_WIDTH) { height = Math.round((height * MAX_WIDTH) / width); width = MAX_WIDTH; }
+                canvas.width = width; canvas.height = height;
+                canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                chrome.storage.local.set({ pickcatLogo: canvas.toDataURL('image/png') }, () => loadAllConfigs());
+            };
+            img.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+    clearLogoBtn.addEventListener('click', () => {
+        chrome.storage.local.set({ pickcatLogo: '' }, () => loadAllConfigs());
+    });
+
     cursorItems.forEach(item => {
         item.addEventListener('click', () => {
             const val = item.dataset.val;
@@ -1889,8 +1975,10 @@ function loadAllConfigs(callback) {
         config.bgUrl = pick('pickcatBgUrl', res.pickcatBgUrl || '');
         config.bgBase64 = pick('pickcatBgBase64', res.pickcatBgBase64 || '');
         config.maskEnabled = pick('pickcatMaskEnabled', res.pickcatMaskEnabled === true) === true;
+        config.logo = pick('pickcatLogo', res.pickcatLogo || '');
 
         applyBackground(config.bgUrl, config.bgBase64, config.maskEnabled);
+        applyLogo(config.logo);
         
         let cursorStyle = pick('pickcatCursor', res.pickcatCursor || 'default'); 
         if (['style4', 'style5'].includes(cursorStyle)) cursorStyle = 'default';
@@ -1953,6 +2041,7 @@ function startApp() {
             injectKitten3();
             transformCreationCards(); 
             transformCategoriesToList();
+            applyLogo(config.logo);
         }, 100); 
     });
     observer.observe(document.body, { childList: true, subtree: true });
@@ -1976,7 +2065,7 @@ try {
 
 chrome.storage.onChanged.addListener((changes) => {
     if (
-        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || 
+        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || changes.pickcatLogo ||
         changes.pickcatCursor || changes.pickcatCustomCursor ||
         changes.pickcatHideCat || changes.pickcatKitten4 || 
         changes.pickcatCategoryList || changes.pickcatCreationGrid
@@ -2091,7 +2180,7 @@ const Workshop = (function () {
     const CATALOG_SOFT_TTL = 10 * 60 * 1000;
     const CATALOG_LOCAL_TTL = 30 * 60 * 1000;
     const REPO_URL = 'https://github.com/lszh2012/Pickcat-Plus';
-    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor'];
+    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo'];
     const ID_RE = /^[a-z0-9][a-z0-9._-]{1,48}$/;
     const PATH_RE = /^[A-Za-z0-9._\/-]+$/;
     const HOST_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
