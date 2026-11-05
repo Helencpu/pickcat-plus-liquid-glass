@@ -1235,7 +1235,7 @@ function createSettingsPanel() {
 
         <div id="settings-panel">
             <div class="panel-header">
-                <h2>PICKCAT Plus 设置</h2>
+                <h2>Pickcat Plus PRO设置</h2>
                 <button class="close-btn" id="close-panel">
                     <svg viewBox="0 0 24 24"><path d="M6.225 4.811a1 1 0 0 0-1.414 1.414L10.586 12l-5.775 5.775a1 1 0 1 0 1.414 1.414L12 13.414l5.775 5.775a1 1 0 0 0 1.414-1.414L13.414 12l5.775-5.775a1 1 0 0 0-1.414-1.414L12 10.586 6.225 4.811z"/></svg>
                 </button>
@@ -1434,6 +1434,7 @@ function createSettingsPanel() {
                     </div>
 
                     <div class="tab-content" id="tab-about">
+                        <div class="section-title">官方版本</div>
                         <div class="row-card" style="flex-direction: column; align-items: flex-start; gap: 12px;">
                             <h3 style="margin:0; color:var(--text-main);">PICKCAT Plus v2.2.3</h3>
                             <p style="margin:0; font-size:13px; color:var(--text-muted); line-height:1.6;">
@@ -1444,10 +1445,22 @@ function createSettingsPanel() {
                                 <a href="https://github.com/lszh2012/Pickcat-Plus" target="_blank" rel="noopener" style="color:var(--primary); font-size:13px; text-decoration:none;">👉 访问 GitHub 仓库</a>
                                 <a href="https://pickcat.dao3.fun/profile/01a0d3af-d524-7801-a9df-dea9be93072a" target="_blank" rel="noopener" style="color:var(--primary); font-size:13px; text-decoration:none;">🐾 我的 PICKCAT 主页</a>
                             </div>
-                            <div style="margin-top:16px; width:100%; display:flex; gap:8px;">
-                                <button id="resetAllBtn" style="flex:1; padding:10px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer; font:inherit;">🔄 重置所有设置</button>
-                                <button id="resetCancelBtn" style="display:none; padding:10px 14px; background:transparent; color:var(--text-muted); border:1px solid var(--border); border-radius:8px; cursor:pointer; font:inherit;">取消</button>
+                        </div>
+                        <div class="section-title" style="margin-top:14px;">现有版本</div>
+                        <div class="row-card" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+                            <h3 style="margin:0; color:var(--text-main);">Pickcat Plus PRO v1.0.1</h3>
+                            <p style="margin:0; font-size:13px; color:var(--text-muted); line-height:1.6;">
+                                基于社区版定制的个人增强版：液态玻璃主题、苹果式动效，<br>
+                                支持站点 Logo 替换与自定义背景。由 Helencpu 独立维护。
+                            </p>
+                            <div style="display:flex; flex-direction:column; gap:6px;">
+                                <a href="https://github.com/Helencpu/pickcat-plus-liquid-glass" target="_blank" rel="noopener" style="color:var(--primary); font-size:13px; text-decoration:none;">👉 访问 GitHub 仓库</a>
+                                <a href="https://pickcat.dao3.fun/profile/01a11126-ecda-7e6a-a069-0e077f82f8f5" target="_blank" rel="noopener" style="color:var(--primary); font-size:13px; text-decoration:none;">🐾 我的 PICKCAT 主页</a>
                             </div>
+                        </div>
+                        <div style="margin-top:16px; width:100%; display:flex; gap:8px;">
+                            <button id="resetAllBtn" style="flex:1; padding:10px; background:#ef4444; color:white; border:none; border-radius:8px; cursor:pointer; font:inherit;">🔄 重置所有设置</button>
+                            <button id="resetCancelBtn" style="display:none; padding:10px 14px; background:transparent; color:var(--text-muted); border:1px solid var(--border); border-radius:8px; cursor:pointer; font:inherit;">取消</button>
                         </div>
                     </div>
                 </div>
