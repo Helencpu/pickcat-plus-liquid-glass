@@ -258,6 +258,418 @@ function applyLogo(logo) {
     });
 }
 
+// 全站磨砂玻璃：整站背景光感 + 卡片/头部玻璃化 + 入场与悬停动效
+// 有自定义背景图时，改用透明层 + backdrop-filter 把用户背景磨砂，不遮挡原图
+function applyGlassSite(enabled, bgUrl, bgBase64) {
+    const STYLE_ID = 'pickcat-glass-site-style';
+    let style = document.getElementById(STYLE_ID);
+    if (!enabled) {
+        if (style) style.remove();
+        return;
+    }
+    const hasBg = !!(bgBase64 && String(bgBase64).trim().length >= 5) || !!(bgUrl && String(bgUrl).trim().length >= 5);
+    const isDark = isDarkMode();
+
+    if (!style) {
+        style = document.createElement('style');
+        style.id = STYLE_ID;
+        document.head.appendChild(style);
+    }
+
+    const blobsLight = `
+ radial-gradient(70% 50% at 10% 6%, rgba(96,145,255,.32), transparent 62%),
+ radial-gradient(60% 50% at 92% 10%, rgba(255,120,205,.24), transparent 62%),
+ radial-gradient(70% 60% at 50% 108%, rgba(90,238,196,.26), transparent 62%),
+ radial-gradient(50% 45% at 82% 70%, rgba(255,205,110,.20), transparent 64%),
+ linear-gradient(180deg,#f6f9ff,#edf2fb)`;
+    const blobsDark = `
+ radial-gradient(70% 50% at 10% 6%, rgba(70,120,235,.50), transparent 62%),
+ radial-gradient(60% 50% at 92% 10%, rgba(165,70,160,.42), transparent 62%),
+ radial-gradient(70% 60% at 50% 108%, rgba(0,168,160,.38), transparent 62%),
+ radial-gradient(50% 45% at 82% 70%, rgba(120,90,220,.36), transparent 64%),
+ linear-gradient(180deg,#0d1220,#090d16)`;
+
+    // 有自定义背景图时，改用透明磨砂层（backdrop-filter 磨砂原图），不铺渐变以免盖住
+    const bgLayerLight = hasBg
+        ? `background:rgba(255,255,255,.14);-webkit-backdrop-filter:blur(26px) saturate(160%);backdrop-filter:blur(26px) saturate(160%);`
+        : `background:${blobsLight};`;
+    const bgLayerDark = hasBg
+        ? `background:rgba(10,14,24,.18);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);`
+        : `background:${blobsDark};`;
+
+    const light = `
+html::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;${bgLayerLight}}
+body,.bg-muted,main{background-color:transparent!important;}
+article[class*="min-w-0"]:not([class*="rounded-lg"]){margin-left:8px!important;margin-right:-12px!important;padding-right:16px!important;}
+article{background-color:rgba(255,255,255,.38)!important;-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%);border:1px solid rgba(255,255,255,.65)!important;box-shadow:0 10px 30px rgba(30,45,80,.09), inset 0 1px 0 rgba(255,255,255,.8)!important;transition:transform .5s cubic-bezier(.32,.72,0,1),box-shadow .5s cubic-bezier(.32,.72,0,1);will-change:transform;}
+article:hover{transform:translateY(-5px) scale(1.006);box-shadow:0 22px 52px rgba(30,45,80,.16), inset 0 1px 0 rgba(255,255,255,.92)!important;}
+header{background-color:rgba(255,255,255,.55)!important;-webkit-backdrop-filter:blur(22px) saturate(175%);backdrop-filter:blur(22px) saturate(175%);border-bottom:1px solid rgba(255,255,255,.55)!important;}
+a[class*="aspect-square"]{background-color:rgba(255,255,255,.36)!important;-webkit-backdrop-filter:blur(16px) saturate(175%);backdrop-filter:blur(16px) saturate(175%);border:1px solid rgba(255,255,255,.6)!important;box-shadow:0 8px 22px rgba(30,45,80,.07), inset 0 1px 0 rgba(255,255,255,.78)!important;transition:transform .4s cubic-bezier(.32,.72,0,1),box-shadow .4s,background-color .3s!important;}
+a[class*="aspect-square"]:hover{transform:translateY(-3px);background-color:rgba(255,255,255,.48)!important;box-shadow:0 14px 32px rgba(30,45,80,.13), inset 0 1px 0 rgba(255,255,255,.88)!important;}
+a[class*="overflow-hidden"][class*="min-h-12"]{background-color:rgba(255,255,255,.32)!important;-webkit-backdrop-filter:blur(14px) saturate(165%);backdrop-filter:blur(14px) saturate(165%);border:1px solid rgba(255,255,255,.55)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.78)!important;transition:background-color .3s,transform .3s!important;}
+a[class*="overflow-hidden"][class*="min-h-12"]:hover{background-color:rgba(255,255,255,.46)!important;transform:translateY(-1px);}
+a[class*="posting-entry"]{background-color:rgba(250,50,45,.62)!important;background-image:linear-gradient(180deg,rgba(255,255,255,.30),rgba(255,255,255,0) 62%)!important;-webkit-backdrop-filter:blur(16px) saturate(180%);backdrop-filter:blur(16px) saturate(180%);border:1px solid rgba(255,255,255,.6)!important;box-shadow:0 10px 26px rgba(220,50,70,.24), inset 0 1px 0 rgba(255,255,255,.62)!important;transition:transform .35s cubic-bezier(.32,.72,0,1),box-shadow .35s,background-color .3s!important;}
+a[class*="posting-entry"]:hover{transform:translateY(-1px);background-color:rgba(250,50,45,.74)!important;}
+article *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+@keyframes pickcat-glass-rise{from{opacity:0;transform:translateY(14px);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+article{animation:pickcat-glass-rise .65s cubic-bezier(.32,.72,0,1) both}
+@media (prefers-reduced-motion:reduce){article,a[class*="aspect-square"]{animation:none!important;transition:none!important}}
+`;
+
+    const dark = `
+html::before{content:'';position:fixed;inset:0;z-index:-1;pointer-events:none;${bgLayerDark}}
+body,.bg-muted,main{background-color:transparent!important;}
+article[class*="min-w-0"]:not([class*="rounded-lg"]){margin-left:8px!important;margin-right:-12px!important;padding-right:16px!important;}
+article{background-color:rgba(28,36,54,.40)!important;-webkit-backdrop-filter:blur(18px) saturate(150%);backdrop-filter:blur(18px) saturate(150%);border:1px solid rgba(255,255,255,.14)!important;box-shadow:0 10px 30px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.10)!important;transition:transform .5s cubic-bezier(.32,.72,0,1),box-shadow .5s cubic-bezier(.32,.72,0,1);will-change:transform;}
+article:hover{transform:translateY(-5px) scale(1.006);box-shadow:0 22px 52px rgba(0,0,0,.46), inset 0 1px 0 rgba(255,255,255,.16)!important;}
+header{background-color:rgba(16,22,36,.55)!important;-webkit-backdrop-filter:blur(22px) saturate(165%);backdrop-filter:blur(22px) saturate(165%);border-bottom:1px solid rgba(255,255,255,.10)!important;}
+a[class*="aspect-square"]{background-color:rgba(28,36,54,.38)!important;-webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%);border:1px solid rgba(255,255,255,.13)!important;box-shadow:0 8px 22px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.10)!important;transition:transform .4s cubic-bezier(.32,.72,0,1),box-shadow .4s,background-color .3s!important;}
+a[class*="aspect-square"]:hover{transform:translateY(-3px);background-color:rgba(255,255,255,.08)!important;box-shadow:0 14px 32px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.16)!important;}
+a[class*="overflow-hidden"][class*="min-h-12"]{background-color:rgba(28,36,54,.34)!important;-webkit-backdrop-filter:blur(14px) saturate(150%);backdrop-filter:blur(14px) saturate(150%);border:1px solid rgba(255,255,255,.12)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.10)!important;transition:background-color .3s,transform .3s!important;}
+a[class*="overflow-hidden"][class*="min-h-12"]:hover{background-color:rgba(255,255,255,.08)!important;transform:translateY(-1px);}
+a[class*="posting-entry"]{background-color:rgba(250,50,45,.60)!important;background-image:linear-gradient(180deg,rgba(255,255,255,.22),rgba(255,255,255,0) 62%)!important;-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);border:1px solid rgba(255,255,255,.30)!important;box-shadow:0 10px 26px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.30)!important;transition:transform .35s cubic-bezier(.32,.72,0,1),box-shadow .35s,background-color .3s!important;}
+a[class*="posting-entry"]:hover{transform:translateY(-1px);background-color:rgba(250,50,45,.72)!important;}
+article *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+@keyframes pickcat-glass-rise{from{opacity:0;transform:translateY(14px);filter:blur(10px)}to{opacity:1;transform:none;filter:none}}
+article{animation:pickcat-glass-rise .65s cubic-bezier(.32,.72,0,1) both}
+@media (prefers-reduced-motion:reduce){article,a[class*="aspect-square"]{animation:none!important;transition:none!important}}
+`;
+
+    // 站点用 Tailwind 的 @layer + !important 锁色，把规则放进最先声明的 properties 层，
+    // 才能在 !important 层叠中压过它
+    style.textContent = '@layer properties {' + (isDark ? dark : light) + '}';
+}
+
+const POST_POPUP_HOST_ID = 'pickcat-post-popup-host';
+let postPopupClickHandler = null;
+let postPopupEscHandler = null;
+let postPopupOriginEl = null;
+let postPopupGeom = null;
+
+function pickcatAbsUrl(u) {
+    const s = String(u || '');
+    if (!s) return '';
+    if (/^https?:/i.test(s) || /^data:/i.test(s)) return s;
+    return location.origin + (s.charAt(0) === '/' ? s : '/' + s);
+}
+
+function pickcatSanitizeHtml(html) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = String(html || '');
+    tpl.content.querySelectorAll('script,style,iframe,object,embed,link,meta,form,input,textarea').forEach((n) => n.remove());
+    tpl.content.querySelectorAll('*').forEach((n) => {
+        Array.prototype.slice.call(n.attributes).forEach((at) => {
+            const name = String(at.name || '').toLowerCase();
+            if (name.indexOf('on') === 0) n.removeAttribute(at.name);
+            if ((name === 'href' || name === 'src') && /^\s*javascript:/i.test(at.value)) n.removeAttribute(at.name);
+        });
+    });
+    return tpl.content;
+}
+
+function pickcatFmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function closePostPopup() {
+    const host = document.getElementById(POST_POPUP_HOST_ID);
+    if (postPopupEscHandler) {
+        document.removeEventListener('keydown', postPopupEscHandler);
+        postPopupEscHandler = null;
+    }
+    if (!host) return;
+    document.documentElement.style.removeProperty('overflow');
+
+    const panel = host.shadowRoot ? host.shadowRoot.querySelector('.panel') : null;
+    const mask = host.shadowRoot ? host.shadowRoot.querySelector('.mask') : null;
+    let from = postPopupGeom;
+    if (postPopupOriginEl && postPopupOriginEl.isConnected) {
+        const r = postPopupOriginEl.getBoundingClientRect();
+        from = { left: r.left, top: r.top, width: r.width, height: r.height };
+    }
+
+    if (panel && from) {
+        const pl = parseFloat(panel.style.left) || 0;
+        const pt = parseFloat(panel.style.top) || 0;
+        const pw = panel.offsetWidth || 1;
+        const ph = panel.offsetHeight || 1;
+        const sx = Math.max(0.12, from.width / pw);
+        const sy = Math.max(0.05, Math.min(1, from.height / ph));
+        panel.style.transition = 'transform 0.46s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.34s cubic-bezier(0.32, 0.72, 0, 1)';
+        panel.style.transform = 'translate(' + (from.left - pl) + 'px,' + (from.top - pt) + 'px) scale(' + sx + ',' + sy + ')';
+        panel.style.opacity = '0';
+        if (mask) mask.style.transition = 'opacity 0.34s cubic-bezier(0.32, 0.72, 0, 1)';
+        if (mask) mask.style.opacity = '0';
+        host.classList.add('pk-out');
+        setTimeout(() => { if (host.parentNode) host.remove(); }, 540);
+        return;
+    }
+
+    host.classList.add('pk-out');
+    setTimeout(() => { if (host.parentNode) host.remove(); }, 240);
+}
+
+function openPostPopup(topicId, cardRect, cardEl) {
+    if (!topicId) return;
+    const old = document.getElementById(POST_POPUP_HOST_ID);
+    if (old) old.remove();
+
+    const host = document.createElement('div');
+    host.id = POST_POPUP_HOST_ID;
+    document.documentElement.style.overflow = 'hidden';
+    const shadow = host.attachShadow({ mode: 'open' });
+    const dark = isDarkMode();
+
+    shadow.innerHTML = `
+        <style>
+            :host { all: initial; }
+            .mask {
+                position: fixed; inset: 0;
+                background: rgba(10, 16, 30, 0.42);
+                -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+                opacity: 0; transition: opacity 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+            }
+            .panel {
+                position: fixed; display: flex; flex-direction: column; overflow: hidden;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+                color: ${dark ? '#f2f6ff' : '#16213a'};
+                background: ${dark
+                    ? 'linear-gradient(180deg, rgba(26,34,52,0.92), rgba(18,24,38,0.90))'
+                    : 'linear-gradient(180deg, rgba(255,255,255,0.94), rgba(250,252,255,0.88))'};
+                -webkit-backdrop-filter: blur(30px) saturate(180%);
+                backdrop-filter: blur(30px) saturate(180%);
+                border: 1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.75)'};
+                border-radius: 26px;
+                box-shadow: 0 32px 90px rgba(10,20,45,0.34), inset 0 1px 0 ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.95)'};
+                transform-origin: top left;
+                will-change: transform, opacity;
+                opacity: 0;
+            }
+            .head { display: flex; align-items: flex-start; gap: 14px; padding: 20px 24px 14px; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,25,50,0.07)'}; }
+            .head-main { flex: 1; min-width: 0; }
+            .title { font-size: 19px; font-weight: 800; line-height: 1.4; margin: 0; letter-spacing: 0.2px; }
+            .sub { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: ${dark ? '#a9b6cd' : '#64748b'}; flex-wrap: wrap; }
+            .tag { padding: 2px 9px; border-radius: 999px; font-size: 11px; background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(250,50,45,0.08)'}; color: ${dark ? '#ffb3b0' : '#e14b45'}; }
+            .close {
+                width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; flex: 0 0 auto;
+                background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,25,50,0.06)'};
+                color: inherit; font-size: 17px; line-height: 32px; text-align: center;
+                transition: transform 0.25s cubic-bezier(0.32,0.72,0,1), background 0.25s;
+            }
+            .close:hover { transform: rotate(90deg) scale(1.08); background: ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,25,50,0.12)'}; }
+            .body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 360px; }
+            .post { overflow: auto; padding: 18px 26px 30px; font-size: 14.5px; line-height: 1.78; }
+            .post img { max-width: 100%; border-radius: 12px; }
+            .post p { margin: 0 0 14px; }
+            .post a { color: ${dark ? '#8ab4ff' : '#2f6fe4'}; }
+            .comments { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,25,50,0.07)'}; background: ${dark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.42)'}; }
+            .c-head { padding: 14px 18px 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.3px; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,25,50,0.05)'}; }
+            .c-list { overflow: auto; padding: 6px 14px 22px; }
+            .c-item { display: flex; gap: 10px; padding: 12px 6px; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,25,50,0.05)'}; animation: pk-c-in 0.4s cubic-bezier(0.32,0.72,0,1) both; }
+            .c-ava { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: rgba(120,130,150,0.2); }
+            .c-main { flex: 1; min-width: 0; }
+            .c-top { display: flex; align-items: baseline; gap: 8px; }
+            .c-name { font-size: 12.5px; font-weight: 700; }
+            .c-time { font-size: 11px; color: ${dark ? '#93a1b8' : '#8a96ab'}; }
+            .c-body { font-size: 13.5px; line-height: 1.7; margin-top: 4px; word-break: break-word; }
+            .c-body p { margin: 0 0 6px; }
+            .c-body img { max-width: 100%; border-radius: 8px; }
+            .c-like { margin-top: 4px; font-size: 11px; color: ${dark ? '#93a1b8' : '#98a3b7'}; }
+            .loading { padding: 40px 20px; text-align: center; font-size: 13px; color: ${dark ? '#a9b6cd' : '#7b879c'}; }
+            .err { padding: 40px 20px; text-align: center; font-size: 13px; color: #e05252; }
+            @keyframes pk-c-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+            @media (max-width: 820px) {
+                .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 42vh; }
+                .comments { border-left: none; border-top: 1px solid ${dark ? 'rgba(255,255,255,0.08)' : 'rgba(15,25,50,0.07)'}; }
+            }
+        </style>
+        <div class="mask"></div>
+        <div class="panel">
+            <div class="head">
+                <div class="head-main">
+                    <h1 class="title">加载中…</h1>
+                    <div class="sub"></div>
+                </div>
+                <button class="close" title="关闭">×</button>
+            </div>
+            <div class="body">
+                <div class="post"><div class="loading">正在读取帖子…</div></div>
+                <aside class="comments">
+                    <div class="c-head">评论</div>
+                    <div class="c-list"><div class="loading">正在读取评论…</div></div>
+                </aside>
+            </div>
+        </div>
+    `;
+
+    document.documentElement.appendChild(host);
+
+    const panel = shadow.querySelector('.panel');
+    const mask = shadow.querySelector('.mask');
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const panelW = Math.min(1080, vw - 72);
+    const panelH = Math.min(760, vh - 88);
+    const panelLeft = Math.round((vw - panelW) / 2);
+    const panelTop = Math.round((vh - panelH) / 2);
+    panel.style.width = panelW + 'px';
+    panel.style.height = panelH + 'px';
+    panel.style.left = panelLeft + 'px';
+    panel.style.top = panelTop + 'px';
+
+    const from = cardRect && cardRect.width > 40
+        ? cardRect
+        : { left: panelLeft, top: panelTop, width: panelW * 0.72, height: 90 };
+    postPopupGeom = from;
+    postPopupOriginEl = cardEl || null;
+    const dx = from.left - panelLeft;
+    const dy = from.top - panelTop;
+    const sx = Math.max(0.2, from.width / panelW);
+    const sy = Math.max(0.08, Math.min(1, from.height / panelH));
+    panel.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
+    panel.style.opacity = '0';
+
+    requestAnimationFrame(() => {
+        mask.style.opacity = '1';
+        panel.style.transition = 'transform 0.55s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.42s cubic-bezier(0.32, 0.72, 0, 1)';
+        panel.style.transform = 'none';
+        panel.style.opacity = '1';
+    });
+
+    mask.addEventListener('click', closePostPopup);
+    shadow.querySelector('.close').addEventListener('click', closePostPopup);
+    postPopupEscHandler = (ev) => { if (ev.key === 'Escape') closePostPopup(); };
+    document.addEventListener('keydown', postPopupEscHandler);
+
+    const titleEl = shadow.querySelector('.title');
+    const subEl = shadow.querySelector('.sub');
+    const postEl = shadow.querySelector('.post');
+    const cHead = shadow.querySelector('.c-head');
+    const cList = shadow.querySelector('.c-list');
+
+    Promise.all([
+        fetch('/api/v1/topics/' + encodeURIComponent(topicId), { credentials: 'same-origin' }).then((r) => r.json()),
+        fetch('/api/v1/topics/' + encodeURIComponent(topicId) + '/posts?limit=50&sort=hot', { credentials: 'same-origin' })
+            .then((r) => r.json()).catch(() => ({ items: [] }))
+    ]).then(([topic, posts]) => {
+        if (!topic || !topic.title) throw new Error('empty');
+        titleEl.textContent = topic.title;
+
+        const tc = topic.tags && topic.tags.length ? topic.tags.slice(0, 3) : [];
+        const meta = document.createElement('span');
+        meta.textContent = (topic.author && topic.author.username ? topic.author.username : '')
+            + ' · ' + pickcatFmtTime(topic.createdAt)
+            + ' · 👁 ' + (topic.viewCount || 0)
+            + ' · 💬 ' + (topic.replyCount || 0);
+        subEl.appendChild(meta);
+        tc.forEach((t) => {
+            const s = document.createElement('span');
+            s.className = 'tag';
+            s.textContent = '#' + t.name;
+            subEl.appendChild(s);
+        });
+
+        postEl.innerHTML = '';
+        const frag = pickcatSanitizeHtml(topic.firstPost && topic.firstPost.cookedHtml ? topic.firstPost.cookedHtml : '');
+        postEl.appendChild(frag);
+
+        const items = (posts && posts.items) ? posts.items : [];
+        cHead.textContent = '全部评论（' + (topic.replyCount || items.length) + '）';
+        cList.innerHTML = '';
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'loading';
+            empty.textContent = '还没有评论';
+            cList.appendChild(empty);
+            return;
+        }
+        items.forEach((p, i) => {
+            const row = document.createElement('div');
+            row.className = 'c-item';
+            row.style.animationDelay = Math.min(i, 12) * 0.03 + 's';
+
+            const ava = document.createElement('img');
+            ava.className = 'c-ava';
+            ava.loading = 'lazy';
+            ava.src = pickcatAbsUrl(p.author && p.author.avatar ? p.author.avatar.url : '');
+            ava.alt = '';
+            row.appendChild(ava);
+
+            const main = document.createElement('div');
+            main.className = 'c-main';
+
+            const top = document.createElement('div');
+            top.className = 'c-top';
+            const name = document.createElement('span');
+            name.className = 'c-name';
+            name.textContent = (p.author && p.author.username) ? p.author.username : '匿名';
+            const time = document.createElement('span');
+            time.className = 'c-time';
+            time.textContent = pickcatFmtTime(p.createdAt) + (p.postNumber ? '  #' + p.postNumber : '');
+            top.appendChild(name);
+            top.appendChild(time);
+            main.appendChild(top);
+
+            const body = document.createElement('div');
+            body.className = 'c-body';
+            body.appendChild(pickcatSanitizeHtml(p.cookedHtml));
+            main.appendChild(body);
+
+            if (p.likeCount) {
+                const like = document.createElement('div');
+                like.className = 'c-like';
+                like.textContent = '♥ ' + p.likeCount;
+                main.appendChild(like);
+            }
+
+            row.appendChild(main);
+            cList.appendChild(row);
+        });
+    }).catch(() => {
+        postEl.innerHTML = '<div class="err">读取失败，请稍后再试</div>';
+        cList.innerHTML = '<div class="err">读取失败</div>';
+    });
+}
+
+function applyPostPopup(enabled) {
+    if (!enabled) {
+        if (postPopupClickHandler) {
+            window.removeEventListener('click', postPopupClickHandler, true);
+            postPopupClickHandler = null;
+        }
+        closePostPopup();
+        return;
+    }
+    if (postPopupClickHandler) return;
+
+    postPopupClickHandler = (ev) => {
+        if (ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        if (location.pathname.indexOf('/forum/post/') === 0) return;
+        const target = ev.target;
+        if (!target || !target.closest) return;
+        if (target.closest('#' + POST_POPUP_HOST_ID) || target.closest('#pickcat-settings-host')) return;
+        const anchor = target.closest('a');
+        if (anchor) return;
+        const art = target.closest('article');
+        if (!art) return;
+        const link = art.querySelector('a[href*="/forum/post/"]');
+        if (!link) return;
+        const m = String(link.getAttribute('href') || '').match(/\/forum\/post\/([0-9a-zA-Z-]+)/);
+        if (!m) return;
+        const rect = art.getBoundingClientRect();
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        openPostPopup(m[1], { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, art);
+    };
+    window.addEventListener('click', postPopupClickHandler, true);
+}
+
 function applyHideCat(hide) {
     let style = document.getElementById('pickcat-hide-cat-style');
     if (hide) {
@@ -799,6 +1211,8 @@ const CLAIM_KEY_TYPES = {
     pickcatBgBase64: 'text',
     pickcatLogo: 'text',
     pickcatMaskEnabled: 'bool',
+    pickcatGlassSite: 'bool',
+    pickcatPostPopup: 'bool',
     pickcatCursor: 'cursor',
     pickcatCustomCursor: 'text',
     pickcatHideCat: 'bool',
@@ -1291,6 +1705,28 @@ function createSettingsPanel() {
                             </label>
                         </div>
 
+                        <div class="row-card">
+                            <div class="row-info">
+                                <div class="row-title">全站磨砂玻璃</div>
+                                <div class="row-desc">整站卡片与头部磨砂化，带入场浮现与悬停上浮动效</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="glassSiteToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
+                        <div class="row-card">
+                            <div class="row-info">
+                                <div class="row-title">帖子浮窗</div>
+                                <div class="row-desc">点帖子卡片不跳页，原地放大成双栏浮窗：左边正文，右边评论</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="postPopupToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
                         <div class="section-title" style="margin-top: 12px;">✨ 个性化组件</div>
                         <div class="row-card">
                             <div class="row-info">
@@ -1448,7 +1884,7 @@ function createSettingsPanel() {
                         </div>
                         <div class="section-title" style="margin-top:14px;">现有版本</div>
                         <div class="row-card" style="flex-direction: column; align-items: flex-start; gap: 12px;">
-                            <h3 style="margin:0; color:var(--text-main);">Pickcat Plus PRO v1.0.1</h3>
+                            <h3 style="margin:0; color:var(--text-main);">Pickcat Plus PRO v1.1.0</h3>
                             <p style="margin:0; font-size:13px; color:var(--text-muted); line-height:1.6;">
                                 基于社区版定制的个人增强版：液态玻璃主题、苹果式动效，<br>
                                 支持站点 Logo 替换与自定义背景。由 Helencpu 独立维护。
@@ -1612,6 +2048,8 @@ function createSettingsPanel() {
     const uploadBgBtn = shadow.getElementById('uploadBgBtn');
     const clearBgBtn = shadow.getElementById('clearBgBtn');
     const maskToggle = shadow.getElementById('maskToggle');
+    const glassSiteToggle = shadow.getElementById('glassSiteToggle');
+    const postPopupToggle = shadow.getElementById('postPopupToggle');
 
     const logoInput = shadow.getElementById('logoInput');
     const saveLogoBtn = shadow.getElementById('saveLogoBtn');
@@ -1721,6 +2159,7 @@ function createSettingsPanel() {
                 logoInput.disabled = false;
             }
             maskToggle.checked = res.pickcatMaskEnabled === true;
+            postPopupToggle.checked = res.pickcatPostPopup !== false;
             hideCatToggle.checked = res.pickcatHideCat === true;
             kitten4Toggle.checked = res.pickcatKitten4 === true;
             categoryListToggle.checked = res.pickcatCategoryList === true;
@@ -1798,6 +2237,8 @@ function createSettingsPanel() {
     }
 
     maskToggle.addEventListener('change', (e) => saveState('pickcatMaskEnabled', e.target.checked, true));
+    glassSiteToggle.addEventListener('change', (e) => saveState('pickcatGlassSite', e.target.checked, true));
+    postPopupToggle.addEventListener('change', (e) => saveState('pickcatPostPopup', e.target.checked, true));
     hideCatToggle.addEventListener('change', (e) => saveState('pickcatHideCat', e.target.checked, true));
     kitten4Toggle.addEventListener('change', (e) => saveState('pickcatKitten4', e.target.checked, true));
     categoryListToggle.addEventListener('change', (e) => saveState('pickcatCategoryList', e.target.checked, true));
@@ -1973,7 +2414,7 @@ function createSettingsPanel() {
 // ==========================================
 function loadAllConfigs(callback) {
     chrome.storage.local.get([
-        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo',
+        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup',
         'pickcatHideCat', 'pickcatKitten4', 'pickcatCategoryList', 'pickcatCreationGrid', CLAIMS_KEY
     ], (res) => {
         // 插件租约覆盖：只在内存里生效，不碰用户存的原始值
@@ -1989,9 +2430,13 @@ function loadAllConfigs(callback) {
         config.bgBase64 = pick('pickcatBgBase64', res.pickcatBgBase64 || '');
         config.maskEnabled = pick('pickcatMaskEnabled', res.pickcatMaskEnabled === true) === true;
         config.logo = pick('pickcatLogo', res.pickcatLogo || '');
+        config.glassSite = pick('pickcatGlassSite', res.pickcatGlassSite === true) === true;
+        config.postPopup = pick('pickcatPostPopup', res.pickcatPostPopup !== false) === true;
 
         applyBackground(config.bgUrl, config.bgBase64, config.maskEnabled);
         applyLogo(config.logo);
+        applyGlassSite(config.glassSite, config.bgUrl, config.bgBase64);
+        applyPostPopup(config.postPopup);
         
         let cursorStyle = pick('pickcatCursor', res.pickcatCursor || 'default'); 
         if (['style4', 'style5'].includes(cursorStyle)) cursorStyle = 'default';
@@ -2068,6 +2513,7 @@ try {
     const onSystemThemeChange = () => {
         syncShadowTheme();
         applyBackground(config.bgUrl, config.bgBase64, config.maskEnabled);
+        applyGlassSite(config.glassSite, config.bgUrl, config.bgBase64);
     };
     if (systemThemeQuery.addEventListener) {
         systemThemeQuery.addEventListener('change', onSystemThemeChange);
@@ -2078,7 +2524,7 @@ try {
 
 chrome.storage.onChanged.addListener((changes) => {
     if (
-        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || changes.pickcatLogo ||
+        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || changes.pickcatLogo || changes.pickcatGlassSite || changes.pickcatPostPopup ||
         changes.pickcatCursor || changes.pickcatCustomCursor ||
         changes.pickcatHideCat || changes.pickcatKitten4 || 
         changes.pickcatCategoryList || changes.pickcatCreationGrid
@@ -2193,7 +2639,7 @@ const Workshop = (function () {
     const CATALOG_SOFT_TTL = 10 * 60 * 1000;
     const CATALOG_LOCAL_TTL = 30 * 60 * 1000;
     const REPO_URL = 'https://github.com/lszh2012/Pickcat-Plus';
-    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo'];
+    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup'];
     const ID_RE = /^[a-z0-9][a-z0-9._-]{1,48}$/;
     const PATH_RE = /^[A-Za-z0-9._\/-]+$/;
     const HOST_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
