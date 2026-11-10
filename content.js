@@ -86,7 +86,12 @@ function injectCursorStyle(cursorStyle, customBase64) {
         cursorStyleTag.id = 'pickcat-cursor-style';
         document.head.appendChild(cursorStyleTag);
     }
-    let normal = cursorStyle === 'custom' && customBase64 ? customBase64 : safeGetURL(`cursors/${cursorStyle}.png`);
+    // custom 但没存自定义图时，直接当默认指针处理（否则会去请求不存在的 cursors/custom.png）
+    if (cursorStyle === 'custom' && !customBase64) {
+        if (cursorStyleTag) cursorStyleTag.remove();
+        return;
+    }
+    let normal = cursorStyle === 'custom' ? customBase64 : safeGetURL(`cursors/${cursorStyle}.png`);
     cursorStyleTag.textContent = `
         html, body, div, span, p, h1, h2, h3, h4, h5, h6, li, ul, ol, table, tr, td, th, main, header, footer, section, article, textarea, input, a, button, [role="button"], select, option, summary, img, canvas, svg, video { cursor: url('${normal}'), auto !important; }
         a, a *, button, button *, [role="button"], .cursor-pointer, select, option, summary, [onclick], .btn { cursor: url('${normal}'), pointer !important; }
@@ -113,43 +118,51 @@ function ensureBgStripStyle() {
     if (!st) {
         st = document.createElement('style');
         st.id = 'pickcat-bg-strip-style';
-        st.textContent = `[${BG_STRIP_ATTR}="1"] { background-color: transparent !important; background-image: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }`;
+        st.textContent = `[${BG_STRIP_ATTR}="1"] { background-color: transparent !important; background-image: none !important; }`;
         (document.head || document.documentElement).appendChild(st);
     }
 }
 
+function contentRoot() {
+    return document.querySelector('main') ||
+        document.querySelector('#__nuxt') ||
+        document.querySelector('article') ||
+        document.body;
+}
+
 function stripBigBackgrounds() {
     if (!bgStripActive || !document.body) return 0;
-    const vw = window.innerWidth || 1280;
-    const vh = window.innerHeight || 800;
-    const minW = vw * 0.7;
-    const minH = vh * 0.5;
-    let budget = 900;
     let hits = 0;
-    (function visit(el, depth) {
-        if (depth > 9 || budget <= 0) return;
-        const kids = el.children;
-        for (let i = 0; i < kids.length; i++) {
-            if (budget-- <= 0) return;
-            const child = kids[i];
-            if (!(child instanceof HTMLElement)) continue;
-            // 别碰我们自己的面板 / 主题提示层
-            if (child.id === 'pickcat-settings-host' || child.id === 'pickcat-ws-toast') continue;
-            const r = child.getBoundingClientRect();
-            if (r.width < minW || r.height < minH) continue;
-            const s = getComputedStyle(child);
-            const bgc = s.backgroundColor;
-            const paints = (bgc && bgc !== 'rgba(0, 0, 0, 0)' && bgc !== 'transparent')
-                || (s.backgroundImage && s.backgroundImage !== 'none');
-            if (paints) {
-                if (child.getAttribute(BG_STRIP_ATTR) !== '1') {
-                    child.setAttribute(BG_STRIP_ATTR, '1');
-                    hits++;
-                }
-            }
-            visit(child, depth + 1);
+    let node = contentRoot();
+    while (node && node !== document.documentElement) {
+        const parent = node.parentElement;
+        if (!parent || parent === document.documentElement) break;
+        if (parent.id === 'pickcat-settings-host' || parent.id === 'pickcat-ws-toast') {
+            node = parent;
+            continue;
         }
-    })(document.body, 0);
+        const s = getComputedStyle(parent);
+        const bgc = s.backgroundColor;
+        const paints = (bgc && bgc !== 'rgba(0, 0, 0, 0)' && bgc !== 'transparent')
+            || (s.backgroundImage && s.backgroundImage !== 'none');
+        const bf = s.backdropFilter || s.webkitBackdropFilter;
+        const isBlur = !!(bf && bf !== 'none');
+        const isOverlay = s.position === 'fixed';
+        let alpha = 1;
+        const mA = /rgba?\(([^)]+)\)/.exec(bgc || '');
+        if (mA) {
+            const parts = mA[1].split(',');
+            if (parts.length >= 4) alpha = parseFloat(parts[3]);
+        }
+        const isDim = bgc && bgc !== 'transparent' && bgc.indexOf('rgba(') === 0 && alpha < 0.9;
+        if (paints && !isBlur && !isOverlay && !isDim) {
+            if (parent.getAttribute(BG_STRIP_ATTR) !== '1') {
+                parent.setAttribute(BG_STRIP_ATTR, '1');
+                hits++;
+            }
+        }
+        node = parent;
+    }
     return hits;
 }
 
@@ -345,6 +358,9 @@ let postPopupClickHandler = null;
 let postPopupEscHandler = null;
 let postPopupOriginEl = null;
 let postPopupGeom = null;
+let postPopupList = [];
+let postPopupIndex = -1;
+let postPopupKeyHandler = null;
 
 function pickcatAbsUrl(u) {
     const s = String(u || '');
@@ -413,7 +429,42 @@ function closePostPopup() {
     setTimeout(() => { if (host.parentNode) host.remove(); }, 240);
 }
 
-function openPostPopup(topicId, cardRect, cardEl) {
+function destroyPostPopup() {
+    const host = document.getElementById(POST_POPUP_HOST_ID);
+    if (postPopupEscHandler) {
+        document.removeEventListener('keydown', postPopupEscHandler);
+        postPopupEscHandler = null;
+    }
+    if (host) host.remove();
+    document.documentElement.style.removeProperty('overflow');
+}
+
+function collectPostList() {
+    const out = [];
+    const seen = {};
+    document.querySelectorAll('a[href*="/forum/post/"]').forEach((a) => {
+        if (a.closest('#' + POST_POPUP_HOST_ID)) return;
+        const art = a.closest('article');
+        if (!art) return;
+        const m = String(a.getAttribute('href') || '').match(/\/forum\/post\/([0-9a-zA-Z-]+)/);
+        if (!m || seen[m[1]]) return;
+        seen[m[1]] = 1;
+        out.push({ id: m[1], el: art });
+    });
+    return out;
+}
+
+function navPostPopup(dir) {
+    if (!postPopupList.length) return;
+    const next = postPopupIndex + dir;
+    if (next < 0 || next >= postPopupList.length) return;
+    const item = postPopupList[next];
+    postPopupIndex = next;
+    destroyPostPopup();
+    openPostPopup(item.id, null, item.el, dir);
+}
+
+function openPostPopup(topicId, cardRect, cardEl, dir) {
     if (!topicId) return;
     const old = document.getElementById(POST_POPUP_HOST_ID);
     if (old) old.remove();
@@ -453,7 +504,18 @@ function openPostPopup(topicId, cardRect, cardEl) {
             .head-main { flex: 1; min-width: 0; }
             .title { font-size: 19px; font-weight: 800; line-height: 1.4; margin: 0; letter-spacing: 0.2px; }
             .sub { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: ${dark ? '#a9b6cd' : '#64748b'}; flex-wrap: wrap; }
+            .head-ava { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: rgba(120,130,150,0.2); border: 1px solid ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.9)'}; }
             .tag { padding: 2px 9px; border-radius: 999px; font-size: 11px; background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(250,50,45,0.08)'}; color: ${dark ? '#ffb3b0' : '#e14b45'}; }
+            .open-btn {
+                width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; flex: 0 0 auto;
+                display: flex; align-items: center; justify-content: center; padding: 0;
+                background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,25,50,0.06)'};
+                color: inherit;
+                transition: transform 0.25s cubic-bezier(0.32,0.72,0,1), background 0.25s;
+            }
+            .open-btn:hover { transform: scale(1.1); background: ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,25,50,0.12)'}; }
+            .open-btn:active { transform: scale(0.94); }
+            .open-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
             .close {
                 width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; flex: 0 0 auto;
                 background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,25,50,0.06)'};
@@ -470,9 +532,14 @@ function openPostPopup(topicId, cardRect, cardEl) {
             .c-head { padding: 14px 18px 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.3px; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,25,50,0.05)'}; }
             .c-list { overflow: auto; padding: 6px 14px 22px; }
             .c-item { display: flex; gap: 10px; padding: 12px 6px; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,25,50,0.05)'}; animation: pk-c-in 0.4s cubic-bezier(0.32,0.72,0,1) both; }
+            .c-item.c-reply { border-bottom: none; padding: 9px 6px 9px 10px; background: ${dark ? 'rgba(255,255,255,0.035)' : 'rgba(250,50,45,0.035)'}; border-left: 2px solid ${dark ? 'rgba(255,120,115,0.5)' : 'rgba(250,50,45,0.35)'}; border-radius: 0 10px 10px 0; }
             .c-ava { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex: 0 0 auto; background: rgba(120,130,150,0.2); }
+            .c-ava.c-ava-sm { width: 22px; height: 22px; }
+            .c-floor { font-size: 10.5px; font-weight: 700; color: ${dark ? '#ffb3b0' : '#e14b45'}; padding: 1px 6px; border-radius: 6px; background: ${dark ? 'rgba(250,50,45,0.16)' : 'rgba(250,50,45,0.09)'}; }
+            .c-reply-to { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; font-size: 11px; color: ${dark ? '#93a1b8' : '#8a96ab'}; }
+            .c-reply-to b { font-weight: 700; }
             .c-main { flex: 1; min-width: 0; }
-            .c-top { display: flex; align-items: baseline; gap: 8px; }
+            .c-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
             .c-name { font-size: 12.5px; font-weight: 700; }
             .c-time { font-size: 11px; color: ${dark ? '#93a1b8' : '#8a96ab'}; }
             .c-body { font-size: 13.5px; line-height: 1.7; margin-top: 4px; word-break: break-word; }
@@ -481,6 +548,22 @@ function openPostPopup(topicId, cardRect, cardEl) {
             .c-like { margin-top: 4px; font-size: 11px; color: ${dark ? '#93a1b8' : '#98a3b7'}; }
             .loading { padding: 40px 20px; text-align: center; font-size: 13px; color: ${dark ? '#a9b6cd' : '#7b879c'}; }
             .err { padding: 40px 20px; text-align: center; font-size: 13px; color: #e05252; }
+            .nav-btn {
+                position: fixed; top: 50%; transform: translateY(-50%); z-index: 2;
+                width: 54px; height: 54px; border-radius: 50%; border: none; cursor: pointer;
+                display: flex; align-items: center; justify-content: center;
+                font-size: 26px; line-height: 1; padding: 0 0 4px;
+                color: ${dark ? '#f2f6ff' : '#16213a'};
+                background: ${dark ? 'rgba(38,48,70,0.72)' : 'rgba(255,255,255,0.72)'};
+                -webkit-backdrop-filter: blur(22px) saturate(180%);
+                backdrop-filter: blur(22px) saturate(180%);
+                border: 1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.8)'};
+                box-shadow: 0 12px 32px rgba(10,20,45,0.26), inset 0 1px 0 ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.9)'};
+                transition: transform 0.3s cubic-bezier(0.32,0.72,0,1), opacity 0.25s, background 0.25s;
+            }
+            .nav-btn:hover { transform: translateY(-50%) scale(1.1); }
+            .nav-btn:active { transform: translateY(-50%) scale(0.94); }
+            .nav-btn[disabled] { opacity: 0.28; cursor: default; transform: translateY(-50%); }
             @keyframes pk-c-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
             @media (max-width: 820px) {
                 .body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 42vh; }
@@ -488,12 +571,18 @@ function openPostPopup(topicId, cardRect, cardEl) {
             }
         </style>
         <div class="mask"></div>
+        <button class="nav-btn nav-prev" title="上一个帖子（←）">‹</button>
+        <button class="nav-btn nav-next" title="下一个帖子（→）">›</button>
         <div class="panel">
             <div class="head">
+                <img class="head-ava" alt="">
                 <div class="head-main">
                     <h1 class="title">加载中…</h1>
                     <div class="sub"></div>
                 </div>
+                <button class="open-btn" title="在新标签打开原帖">
+                    <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>
+                </button>
                 <button class="close" title="关闭">×</button>
             </div>
             <div class="body">
@@ -527,11 +616,25 @@ function openPostPopup(topicId, cardRect, cardEl) {
         : { left: panelLeft, top: panelTop, width: panelW * 0.72, height: 90 };
     postPopupGeom = from;
     postPopupOriginEl = cardEl || null;
+
+    const prevBtn = shadow.querySelector('.nav-prev');
+    const nextBtn = shadow.querySelector('.nav-next');
+    prevBtn.style.left = (panelLeft - 27) + 'px';
+    nextBtn.style.left = (panelLeft + panelW - 27) + 'px';
+    prevBtn.disabled = postPopupIndex <= 0;
+    nextBtn.disabled = postPopupIndex < 0 || postPopupIndex >= postPopupList.length - 1;
+    prevBtn.addEventListener('click', () => navPostPopup(-1));
+    nextBtn.addEventListener('click', () => navPostPopup(1));
     const dx = from.left - panelLeft;
     const dy = from.top - panelTop;
     const sx = Math.max(0.2, from.width / panelW);
     const sy = Math.max(0.08, Math.min(1, from.height / panelH));
-    panel.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
+    if (dir) {
+        panel.style.transform = 'translateX(' + (dir > 0 ? 96 : -96) + 'px) scale(0.97)';
+        mask.style.opacity = '1';
+    } else {
+        panel.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(' + sx + ',' + sy + ')';
+    }
     panel.style.opacity = '0';
 
     requestAnimationFrame(() => {
@@ -543,11 +646,21 @@ function openPostPopup(topicId, cardRect, cardEl) {
 
     mask.addEventListener('click', closePostPopup);
     shadow.querySelector('.close').addEventListener('click', closePostPopup);
-    postPopupEscHandler = (ev) => { if (ev.key === 'Escape') closePostPopup(); };
+    shadow.querySelector('.open-btn').addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        window.open(location.origin + '/forum/post/' + encodeURIComponent(topicId), '_blank', 'noopener');
+    });
+    postPopupEscHandler = (ev) => {
+        if (ev.key === 'Escape') { closePostPopup(); return; }
+        if (ev.key === 'ArrowLeft') { ev.preventDefault(); navPostPopup(-1); return; }
+        if (ev.key === 'ArrowRight') { ev.preventDefault(); navPostPopup(1); }
+    };
     document.addEventListener('keydown', postPopupEscHandler);
 
     const titleEl = shadow.querySelector('.title');
     const subEl = shadow.querySelector('.sub');
+    const headAva = shadow.querySelector('.head-ava');
     const postEl = shadow.querySelector('.post');
     const cHead = shadow.querySelector('.c-head');
     const cList = shadow.querySelector('.c-list');
@@ -574,30 +687,48 @@ function openPostPopup(topicId, cardRect, cardEl) {
             subEl.appendChild(s);
         });
 
+        const av = topic.author && topic.author.avatar;
+        const avSrc = av && av.url ? pickcatAbsUrl(av.url) : (av && av.id ? '/api/v1/avatars/' + av.id : '');
+        if (avSrc) { headAva.src = avSrc; headAva.style.visibility = 'visible'; } else { headAva.style.visibility = 'hidden'; }
+
         postEl.innerHTML = '';
         const frag = pickcatSanitizeHtml(topic.firstPost && topic.firstPost.cookedHtml ? topic.firstPost.cookedHtml : '');
         postEl.appendChild(frag);
 
         const items = (posts && posts.items) ? posts.items : [];
+        const byNum = {};
+        items.forEach((p) => { byNum[p.postNumber] = p; });
+        const depthOf = (p) => {
+            let depth = 0, cur = p, guard = 0;
+            while (cur && cur.replyToPostNumber > 1 && byNum[cur.replyToPostNumber] && guard++ < 12) {
+                depth++; cur = byNum[cur.replyToPostNumber];
+            }
+            return depth;
+        };
+        const sorted = items.slice().sort((a, b) => (a.postNumber || 0) - (b.postNumber || 0));
         cHead.textContent = '全部评论（' + (topic.replyCount || items.length) + '）';
         cList.innerHTML = '';
-        if (!items.length) {
+        if (!sorted.length) {
             const empty = document.createElement('div');
             empty.className = 'loading';
             empty.textContent = '还没有评论';
             cList.appendChild(empty);
             return;
         }
-        items.forEach((p, i) => {
+        sorted.forEach((p, i) => {
+            const d = depthOf(p);
             const row = document.createElement('div');
-            row.className = 'c-item';
+            row.className = 'c-item' + (d > 0 ? ' c-reply' : '');
+            row.style.marginLeft = Math.min(d, 4) * 16 + 'px';
             row.style.animationDelay = Math.min(i, 12) * 0.03 + 's';
 
             const ava = document.createElement('img');
-            ava.className = 'c-ava';
+            ava.className = 'c-ava' + (d > 0 ? ' c-ava-sm' : '');
             ava.loading = 'lazy';
-            ava.src = pickcatAbsUrl(p.author && p.author.avatar ? p.author.avatar.url : '');
             ava.alt = '';
+            const pa = p.author && p.author.avatar;
+            const paSrc = pa && pa.url ? pickcatAbsUrl(pa.url) : (pa && pa.id ? '/api/v1/avatars/' + pa.id : '');
+            if (paSrc) ava.src = paSrc;
             row.appendChild(ava);
 
             const main = document.createElement('div');
@@ -605,15 +736,27 @@ function openPostPopup(topicId, cardRect, cardEl) {
 
             const top = document.createElement('div');
             top.className = 'c-top';
+            const floor = document.createElement('span');
+            floor.className = 'c-floor';
+            floor.textContent = '#' + (p.postNumber || '');
             const name = document.createElement('span');
             name.className = 'c-name';
             name.textContent = (p.author && p.author.username) ? p.author.username : '匿名';
             const time = document.createElement('span');
             time.className = 'c-time';
-            time.textContent = pickcatFmtTime(p.createdAt) + (p.postNumber ? '  #' + p.postNumber : '');
+            time.textContent = pickcatFmtTime(p.createdAt);
+            top.appendChild(floor);
             top.appendChild(name);
             top.appendChild(time);
             main.appendChild(top);
+
+            if (p.replyToPostNumber && p.replyToPostNumber > 1) {
+                const to = document.createElement('div');
+                to.className = 'c-reply-to';
+                const parent = byNum[p.replyToPostNumber];
+                to.textContent = '↳ 回复 #' + p.replyToPostNumber + (parent && parent.author && parent.author.username ? ' ' + parent.author.username : '');
+                main.appendChild(to);
+            }
 
             const body = document.createElement('div');
             body.className = 'c-body';
@@ -653,14 +796,20 @@ function applyPostPopup(enabled) {
         const target = ev.target;
         if (!target || !target.closest) return;
         if (target.closest('#' + POST_POPUP_HOST_ID) || target.closest('#pickcat-settings-host')) return;
-        const anchor = target.closest('a');
-        if (anchor) return;
         const art = target.closest('article');
         if (!art) return;
+        // 整张卡片都能点开浮窗；只放过卡片内的按钮类控件（点赞、回复、菜单等）
+        if (target.closest('button, [role="button"], input, textarea, select')) return;
         const link = art.querySelector('a[href*="/forum/post/"]');
         if (!link) return;
         const m = String(link.getAttribute('href') || '').match(/\/forum\/post\/([0-9a-zA-Z-]+)/);
         if (!m) return;
+        postPopupList = collectPostList();
+        postPopupIndex = postPopupList.findIndex((x) => x.id === m[1]);
+        if (postPopupIndex < 0) {
+            postPopupList.unshift({ id: m[1], el: art });
+            postPopupIndex = 0;
+        }
         const rect = art.getBoundingClientRect();
         ev.preventDefault();
         ev.stopPropagation();
@@ -703,16 +852,40 @@ const CREATION_SHORTCUTS = [
 const SHORTCUT_BY_TITLE = {};
 CREATION_SHORTCUTS.forEach(sc => { SHORTCUT_BY_TITLE[sc.title] = sc; });
 
+function shortLabelOf(el) {
+    const span = el.querySelector('span');
+    const fromSpan = span ? span.textContent.trim() : '';
+    const fromAria = (el.getAttribute('aria-label') || '').trim();
+    const fromAll = (el.textContent || '').trim();
+    return fromSpan || fromAria || fromAll;
+}
+
 function injectCreationShortcuts() {
     // 开关关着：把已经插进去的克隆全撤掉（不等刷新）
     if (!config.kitten4) { removeCreationShortcuts(); return; }
 
-    // 找站点原生的 KittenN 卡片当模板；找不到就下一轮再说
+    // 修历史遗留：早期误把帖子链接当模板克隆出来的入口，没有 data-pickcat-sc 标记，删掉重建
+    document.querySelectorAll('a[id^="pickcat-custom-"]').forEach((el) => {
+        if (el.getAttribute('data-pickcat-sc') !== el.id) el.remove();
+    });
+
+    // 模板必须是创作栏里的编辑器入口：外链 codemao / dao3，主标题短，不能是帖子 / 搜索 / 个人页
+    const isEditorEntry = (link) => {
+        if (CREATION_SHORTCUTS.some(sc => sc.id === link.id)) return false;
+        const href = link.getAttribute('href') || '';
+        if (!href) return false;
+        if (href.indexOf('/forum') >= 0 || href.indexOf('/post') >= 0 ||
+            href.indexOf('/search') >= 0 || href.indexOf('/profile') >= 0) return false;
+        if (!(/codemao\.cn/i.test(href) || /dao3\.fun/i.test(href))) return false;
+        const label = shortLabelOf(link);
+        if (!label || label.length > 24) return false;
+        return link.textContent.includes('KittenN');
+    };
+
     let template = null;
     document.querySelectorAll('a').forEach(link => {
         if (template) return;
-        if (CREATION_SHORTCUTS.some(sc => sc.id === link.id)) return;
-        if (link.textContent.includes('KittenN')) template = link;
+        if (isEditorEntry(link)) template = link;
     });
     if (!template) return;
 
@@ -728,6 +901,8 @@ function injectCreationShortcuts() {
             node.id = sc.id;
             node.href = sc.url;
             node.target = '_blank';
+            node.setAttribute('data-pickcat-sc', sc.id);
+            node.setAttribute('aria-label', sc.title);
             const img = node.querySelector('img');
             if (img) {
                 // 站点的图标是 <img srcset="/_ipx/s_28x28/… 1x, … 2x">。
@@ -820,19 +995,42 @@ function revertCategoryList() {
     revertByKind('category', 'pickcat-category-listified');
 }
 
+function isCreationLink(a) {
+    // 「创作」区那一列入口都是外链编辑器（codemao / dao3）或我们注入的 pickcat-custom-* 克隆
+    if (a.hasAttribute(CLONE_FLAG)) return false;
+    if (a.id && a.id.indexOf('pickcat-custom-') === 0) return true;
+    const href = a.getAttribute('href') || '';
+    if (!href) return false;
+    if (href.indexOf('/forum') >= 0 || href.indexOf('/post') >= 0 ||
+        href.indexOf('/search') >= 0 || href.indexOf('/profile') >= 0) return false;
+    return /codemao\.cn/i.test(href) || /dao3\.fun/i.test(href);
+}
+
 function transformCreationCards() {
     if (!config.creationGrid) { revertCreationCards(); return; }
 
-    const headings = Array.from(document.querySelectorAll('h2, h3, div')).filter(el => el.textContent.trim() === '创作');
-    if (headings.length === 0) return;
-    const heading = headings[0];
+    // 标题必须是「纯文字」的 创作，且它的下一个兄弟容器里真有编辑器入口；
+    // 搜索结果页上的外层容器也满足 textContent==='创作'，以前会误把整页结果当成创作列表重排
+    const candidates = Array.from(document.querySelectorAll('h2, h3, div'))
+        .filter((el) => el.textContent.trim() === '创作')
+        .filter((el) => el.tagName !== 'DIV' || el.children.length === 0);
 
-    const listContainer = heading.nextElementSibling;
-    if (!listContainer || listContainer.tagName !== 'DIV') return;
+    let heading = null;
+    let listContainer = null;
+    for (let i = 0; i < candidates.length; i++) {
+        const box = candidates[i].nextElementSibling;
+        if (!box || box.tagName !== 'DIV') continue;
+        const links = Array.from(box.querySelectorAll('a')).filter(isCreationLink);
+        if (links.length === 0) continue;
+        heading = candidates[i];
+        listContainer = box;
+        break;
+    }
+    if (!heading || !listContainer) { revertCreationCards(); return; }
     if (listContainer.classList.contains('pickcat-grid-layout')) return;
 
-    const items = Array.from(listContainer.querySelectorAll('a')).filter(a => !a.hasAttribute(CLONE_FLAG));
-    if (items.length === 0) return;
+    const items = Array.from(listContainer.querySelectorAll('a')).filter(isCreationLink);
+    if (items.length === 0) { revertCreationCards(); return; }
 
     listContainer.classList.add('pickcat-grid-layout');
 
@@ -1327,6 +1525,10 @@ function createSettingsPanel() {
 
             * { box-sizing: border-box; }
 
+            @media (max-width: 560px) {
+                :host { --panel-width: 96vw; }
+            }
+
             /* ★ 可拖动悬浮球：整块就是抓手，位置由 JS 写 left/top */
             #hover-zone {
                 position: fixed; top: 50%; right: 8px; left: auto;
@@ -1432,15 +1634,25 @@ function createSettingsPanel() {
             .close-btn:active { transform: scale(0.92); }
             .close-btn svg { width: 22px; height: 22px; fill: var(--text-main); }
 
-            .panel-body { display: flex; flex: 1; overflow: hidden; }
+            .panel-body { display: flex; flex: 1; overflow: hidden; position: relative; }
 
             .nav-sidebar {
+                position: absolute; left: 0; top: 0; bottom: 0; z-index: 6;
                 width: 74px; display: flex;
                 flex-direction: column; align-items: flex-start; padding: 12px 10px; gap: 8px; flex-shrink: 0;
-                overflow: hidden; transition: width 0.45s var(--ease-apple); white-space: nowrap;
-                border-right: 1px solid var(--glass-border);
+                overflow: hidden; white-space: nowrap;
+                background: transparent;
+                border-right: 1px solid transparent;
+                transition: width 0.45s var(--ease-apple), background 0.3s var(--ease-apple), box-shadow 0.3s var(--ease-apple), border-color 0.3s var(--ease-apple);
             }
-            .nav-sidebar:hover { width: 188px; }
+            .nav-sidebar:hover {
+                width: 188px;
+                background: var(--glass-card);
+                -webkit-backdrop-filter: blur(30px) saturate(180%);
+                backdrop-filter: blur(30px) saturate(180%);
+                border-right: 1px solid var(--glass-border);
+                box-shadow: 10px 0 30px rgba(15, 23, 42, 0.12);
+            }
 
             .nav-item {
                 display: flex; align-items: center; height: 46px; width: 46px;
@@ -1460,7 +1672,7 @@ function createSettingsPanel() {
             }
             :host(.pickcat-dark) .nav-item:hover { background: rgba(255,255,255,0.12); }
 
-            .content-area { flex: 1; padding: 20px 24px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
+            .content-area { flex: 1; padding: 20px 24px 28px 98px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
             .tab-content { display: none; flex-direction: column; gap: 12px; animation: pickcat-tab-in 0.4s var(--ease-apple) both; }
             .tab-content.active { display: flex; }
             @keyframes pickcat-tab-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -1872,7 +2084,7 @@ function createSettingsPanel() {
                     <div class="tab-content" id="tab-about">
                         <div class="section-title">官方版本</div>
                         <div class="row-card" style="flex-direction: column; align-items: flex-start; gap: 12px;">
-                            <h3 style="margin:0; color:var(--text-main);">PICKCAT Plus v2.2.3</h3>
+                            <h3 style="margin:0; color:var(--text-main);">PICKCAT Plus v2.6.0</h3>
                             <p style="margin:0; font-size:13px; color:var(--text-muted); line-height:1.6;">
                                 一个由社区开发者手搓的非官方 PICKCAT 增强插件。<br>
                                 旨在提供更顺手、更沉浸的社区体验。
@@ -1884,7 +2096,7 @@ function createSettingsPanel() {
                         </div>
                         <div class="section-title" style="margin-top:14px;">现有版本</div>
                         <div class="row-card" style="flex-direction: column; align-items: flex-start; gap: 12px;">
-                            <h3 style="margin:0; color:var(--text-main);">Pickcat Plus PRO v1.1.0</h3>
+                            <h3 style="margin:0; color:var(--text-main);">Pickcat Plus PRO v1.2.0</h3>
                             <p style="margin:0; font-size:13px; color:var(--text-muted); line-height:1.6;">
                                 基于社区版定制的个人增强版：液态玻璃主题、苹果式动效，<br>
                                 支持站点 Logo 替换与自定义背景。由 Helencpu 独立维护。
@@ -2563,6 +2775,9 @@ const Workshop = (function () {
 
     let frame = null;
     let frameReady = false;
+    let sandboxTries = 0;
+    let sandboxRetryTimer = 0;
+    const SANDBOX_MAX_TRIES = 3;
     let readyResolvers = [];
     let cardSeq = 0;
     let pageStyleInjected = false;
@@ -3613,6 +3828,13 @@ const Workshop = (function () {
     /* ---------------- 沙盒通信 ---------------- */
 
     function ensureSandbox() {
+        // iframe 有可能被页面的重渲染弄掉（body 被换掉 / 别的扩展开清节点），
+        // 这时它还在变量里，但已经脱离文档、永远不会再发 ready。
+        if (frame && (!frame.isConnected || !frame.contentWindow)) {
+            try { frame.remove(); } catch (e) { /* ignore */ }
+            frame = null;
+            frameReady = false;
+        }
         if (frame && frameReady) return Promise.resolve();
         if (!frame) {
             frame = document.createElement('iframe');
@@ -3628,9 +3850,14 @@ const Workshop = (function () {
                 if (!frameReady) {
                     const i = readyResolvers.indexOf(resolve);
                     if (i !== -1) readyResolvers.splice(i, 1);
+                    try {
+                        if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+                    } catch (e) { /* ignore */ }
+                    frame = null;
+                    frameReady = false;
                     resolve();
                 }
-            }, 4000);
+            }, 6000);
         });
     }
 
@@ -4059,6 +4286,14 @@ const Workshop = (function () {
         return code;
     }
 
+    function scheduleSandboxRetry() {
+        if (sandboxRetryTimer) clearTimeout(sandboxRetryTimer);
+        sandboxRetryTimer = setTimeout(() => {
+            sandboxRetryTimer = 0;
+            try { runPlugins(); } catch (e) { /* ignore */ }
+        }, sandboxTries * 1200);
+    }
+
     async function runPlugins() {
         if (state.safeMode) return;
         const targets = Object.keys(state.installed).filter((id) => {
@@ -4070,9 +4305,18 @@ const Workshop = (function () {
 
         await ensureSandbox();
         if (!frameReady) {
-            console.warn('[pickcat-workshop] 沙盒未就绪，插件暂不启动');
+            // 冷启动时 iframe 偶尔慢一拍，以前直接放弃并打红字；现在重试 3 次（累计 1.2s / 2.4s / 3.6s）
+            if (sandboxTries < SANDBOX_MAX_TRIES) {
+                sandboxTries += 1;
+                console.log('[pickcat-workshop] 沙盒还没就绪，' + (sandboxTries * 1200) + 'ms 后重试（第 ' + sandboxTries + '/' + SANDBOX_MAX_TRIES + ' 次）');
+                scheduleSandboxRetry();
+            } else {
+                console.warn('[pickcat-workshop] 沙盒尝试 ' + SANDBOX_MAX_TRIES + ' 次仍未就绪，本次不启动插件（刷新页面即可重试）');
+                sandboxTries = 0;
+            }
             return;
         }
+        sandboxTries = 0;
 
         for (const id of targets) {
             const rec = state.installed[id];
