@@ -421,12 +421,20 @@ function closePostPopup() {
         if (mask) mask.style.transition = 'opacity 0.34s cubic-bezier(0.32, 0.72, 0, 1)';
         if (mask) mask.style.opacity = '0';
         host.classList.add('pk-out');
-        setTimeout(() => { if (host.parentNode) host.remove(); }, 540);
+        setTimeout(() => {
+            if (host.parentNode) host.remove();
+            const dk = document.getElementById(POST_POPUP_DOCK_ID);
+            if (dk) dk.style.display = '';
+        }, 540);
         return;
     }
 
     host.classList.add('pk-out');
-    setTimeout(() => { if (host.parentNode) host.remove(); }, 240);
+    setTimeout(() => {
+        if (host.parentNode) host.remove();
+        const dk = document.getElementById(POST_POPUP_DOCK_ID);
+        if (dk) dk.style.display = '';
+    }, 240);
 }
 
 function destroyPostPopup() {
@@ -436,7 +444,141 @@ function destroyPostPopup() {
         postPopupEscHandler = null;
     }
     if (host) host.remove();
+    const dk = document.getElementById(POST_POPUP_DOCK_ID);
+    if (dk) dk.style.display = '';
     document.documentElement.style.removeProperty('overflow');
+}
+
+const POST_POPUP_DOCK_ID = 'pickcat-post-popup-dock';
+const POST_POPUP_DOCK_MAX = 3;
+let postPopupDock = [];
+let postPopupCurrentId = '';
+let postPopupTitle = '';
+
+function collapsePostPopup() {
+    const host = document.getElementById(POST_POPUP_HOST_ID);
+    if (!host || !host.shadowRoot) return;
+    const shadow = host.shadowRoot;
+    const panel = shadow.querySelector('.panel');
+    const mask = shadow.querySelector('.mask');
+    const id = postPopupCurrentId;
+    const title = postPopupTitle;
+    if (postPopupEscHandler) {
+        document.removeEventListener('keydown', postPopupEscHandler);
+        postPopupEscHandler = null;
+    }
+    if (panel) {
+        const pl = parseFloat(panel.style.left) || 0;
+        const pt = parseFloat(panel.style.top) || 0;
+        const tx = 8 - pl;
+        const ty = window.innerHeight / 2 - pt - panel.offsetHeight * 0.62;
+        panel.style.transformOrigin = 'left center';
+        panel.style.transition = 'transform 0.48s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.38s cubic-bezier(0.32, 0.72, 0, 1)';
+        panel.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(0.16)';
+        panel.style.opacity = '0';
+        if (mask) {
+            mask.style.transition = 'opacity 0.3s cubic-bezier(0.32, 0.72, 0, 1)';
+            mask.style.opacity = '0';
+        }
+        shadow.querySelectorAll('.nav-btn').forEach((b) => {
+            b.style.transition = 'opacity 0.2s';
+            b.style.opacity = '0';
+            b.style.pointerEvents = 'none';
+        });
+    }
+    setTimeout(() => {
+        destroyPostPopup();
+        pushPostPopupDock(id, title);
+    }, 460);
+}
+
+function pushPostPopupDock(id, title) {
+    if (!id) return;
+    postPopupDock = postPopupDock.filter((d) => d.id !== id);
+    postPopupDock.push({ id, title: title || '帖子' });
+    while (postPopupDock.length > POST_POPUP_DOCK_MAX) postPopupDock.shift();
+    renderPostPopupDock();
+}
+
+function removePostPopupDock(id) {
+    postPopupDock = postPopupDock.filter((d) => d.id !== id);
+    renderPostPopupDock();
+}
+
+function renderPostPopupDock() {
+    const old = document.getElementById(POST_POPUP_DOCK_ID);
+    if (!postPopupDock.length) {
+        if (old) old.remove();
+        return;
+    }
+    const dark = isDarkMode();
+    let host = old;
+    if (!host) {
+        host = document.createElement('div');
+        host.id = POST_POPUP_DOCK_ID;
+        host.style.cssText = 'position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:2147483000;pointer-events:none;';
+        host.attachShadow({ mode: 'open' });
+        document.documentElement.appendChild(host);
+    }
+    const shadow = host.shadowRoot;
+    shadow.innerHTML = `
+        <style>
+            :host { display: block; width: max-content; pointer-events: none; }
+            .dock { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 10px 10px; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif; }
+            .card {
+                pointer-events: auto; width: 164px; box-sizing: border-box; cursor: pointer;
+                display: flex; align-items: center; gap: 8px; padding: 8px;
+                border-radius: 14px;
+                color: ${dark ? '#f2f6ff' : '#16213a'};
+                background: ${dark ? 'rgba(30,38,58,0.86)' : 'rgba(255,255,255,0.84)'};
+                -webkit-backdrop-filter: blur(24px) saturate(180%); backdrop-filter: blur(24px) saturate(180%);
+                border: 1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.9)'};
+                box-shadow: 0 10px 26px rgba(15,28,60,0.22), inset 0 1px 0 ${dark ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.9)'};
+                transition: transform 0.3s cubic-bezier(0.32,0.72,0,1), box-shadow 0.3s;
+            }
+            .card:hover { transform: translateX(6px) scale(1.03); }
+            .ava { width: 34px; height: 34px; border-radius: 10px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 800; color: #fff; background: linear-gradient(135deg, #fa322d, #ff8f6b); }
+            .txt { flex: 1; min-width: 0; }
+            .t { font-size: 11.5px; font-weight: 700; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .x { width: 18px; height: 18px; flex: 0 0 auto; border: none; border-radius: 50%; padding: 0; cursor: pointer; color: inherit; opacity: 0.5; font-size: 12px; line-height: 18px; text-align: center; background: transparent; }
+            .x:hover { opacity: 1; background: ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(15,25,50,0.10)'}; }
+            @keyframes pk-dock-in { from { opacity: 0; transform: translateX(-56px) scale(0.92); } to { opacity: 1; transform: none; } }
+        </style>
+        <div class="dock"></div>
+    `;
+    const dock = shadow.querySelector('.dock');
+    postPopupDock.forEach((d) => {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.title = d.title;
+        const ava = document.createElement('div');
+        ava.className = 'ava';
+        ava.textContent = String(d.title || '帖').trim().charAt(0);
+        const txt = document.createElement('div');
+        txt.className = 'txt';
+        const t = document.createElement('div');
+        t.className = 't';
+        t.textContent = d.title;
+        txt.appendChild(t);
+        const x = document.createElement('button');
+        x.className = 'x';
+        x.title = '移除';
+        x.textContent = '×';
+        x.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            removePostPopupDock(d.id);
+        });
+        card.appendChild(ava);
+        card.appendChild(txt);
+        card.appendChild(x);
+        card.addEventListener('click', () => {
+            removePostPopupDock(d.id);
+            destroyPostPopup();
+            openPostPopup(d.id, null, null, 0);
+        });
+        dock.appendChild(card);
+    });
 }
 
 function collectPostList() {
@@ -466,8 +608,16 @@ function navPostPopup(dir) {
 
 function openPostPopup(topicId, cardRect, cardEl, dir) {
     if (!topicId) return;
+    postPopupCurrentId = topicId;
+    postPopupTitle = '';
+    if (cardEl) {
+        const tA = cardEl.querySelector('a[href*="/forum/post/"]');
+        if (tA) postPopupTitle = String(tA.textContent || '').trim();
+    }
     const old = document.getElementById(POST_POPUP_HOST_ID);
     if (old) old.remove();
+    const dkOld = document.getElementById(POST_POPUP_DOCK_ID);
+    if (dkOld) dkOld.style.display = 'none';
 
     const host = document.createElement('div');
     host.id = POST_POPUP_HOST_ID;
@@ -516,6 +666,16 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
             .open-btn:hover { transform: scale(1.1); background: ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,25,50,0.12)'}; }
             .open-btn:active { transform: scale(0.94); }
             .open-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+            .min-btn {
+                width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; flex: 0 0 auto;
+                display: flex; align-items: center; justify-content: center; padding: 0;
+                background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,25,50,0.06)'};
+                color: inherit;
+                transition: transform 0.25s cubic-bezier(0.32,0.72,0,1), background 0.25s;
+            }
+            .min-btn:hover { transform: scale(1.1); background: ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(15,25,50,0.12)'}; }
+            .min-btn:active { transform: scale(0.94); }
+            .min-btn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
             .close {
                 width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; flex: 0 0 auto;
                 background: ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(15,25,50,0.06)'};
@@ -580,6 +740,9 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
                     <h1 class="title">加载中…</h1>
                     <div class="sub"></div>
                 </div>
+                <button class="min-btn" title="收起（堆叠到左侧）">
+                    <svg viewBox="0 0 24 24"><path d="M15 4l-7 8 7 8"/></svg>
+                </button>
                 <button class="open-btn" title="在新标签打开原帖">
                     <svg viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>
                 </button>
@@ -646,6 +809,11 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
 
     mask.addEventListener('click', closePostPopup);
     shadow.querySelector('.close').addEventListener('click', closePostPopup);
+    shadow.querySelector('.min-btn').addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        collapsePostPopup();
+    });
     shadow.querySelector('.open-btn').addEventListener('click', (ev) => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -667,11 +835,12 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
 
     Promise.all([
         fetch('/api/v1/topics/' + encodeURIComponent(topicId), { credentials: 'same-origin' }).then((r) => r.json()),
-        fetch('/api/v1/topics/' + encodeURIComponent(topicId) + '/posts?limit=50&sort=hot', { credentials: 'same-origin' })
+        fetch('/api/v1/topics/' + encodeURIComponent(topicId) + '/posts?limit=100&sort=earliest', { credentials: 'same-origin' })
             .then((r) => r.json()).catch(() => ({ items: [] }))
     ]).then(([topic, posts]) => {
         if (!topic || !topic.title) throw new Error('empty');
         titleEl.textContent = topic.title;
+        postPopupTitle = topic.title;
 
         const tc = topic.tags && topic.tags.length ? topic.tags.slice(0, 3) : [];
         const meta = document.createElement('span');
@@ -697,33 +866,36 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
 
         const items = (posts && posts.items) ? posts.items : [];
         const byNum = {};
-        items.forEach((p) => { byNum[p.postNumber] = p; });
-        const depthOf = (p) => {
-            let depth = 0, cur = p, guard = 0;
-            while (cur && cur.replyToPostNumber > 1 && byNum[cur.replyToPostNumber] && guard++ < 12) {
-                depth++; cur = byNum[cur.replyToPostNumber];
-            }
-            return depth;
-        };
-        const sorted = items.slice().sort((a, b) => (a.postNumber || 0) - (b.postNumber || 0));
-        cHead.textContent = '全部评论（' + (topic.replyCount || items.length) + '）';
+        items.forEach((p) => { p.__kids = []; byNum[p.postNumber] = p; });
+        const roots = [];
+        items.forEach((p) => {
+            const parent = p.replyToPostNumber > 1 ? byNum[p.replyToPostNumber] : null;
+            if (parent) parent.__kids.push(p);
+            else roots.push(p);
+        });
+        const byFloor = (a, b) => (a.postNumber || 0) - (b.postNumber || 0);
+        roots.sort(byFloor);
+        const total = topic.replyCount || items.length;
+        cHead.textContent = items.length >= total ? ('全部评论（' + total + '）') : ('评论（已载入 ' + items.length + ' / 共 ' + total + '）');
         cList.innerHTML = '';
-        if (!sorted.length) {
+        if (!items.length) {
             const empty = document.createElement('div');
             empty.className = 'loading';
             empty.textContent = '还没有评论';
             cList.appendChild(empty);
             return;
         }
-        sorted.forEach((p, i) => {
-            const d = depthOf(p);
+        let seq = 0;
+        const renderOne = (p, depth) => {
+            p.__kids.sort(byFloor);
+            const d = Math.min(depth, 3);
             const row = document.createElement('div');
-            row.className = 'c-item' + (d > 0 ? ' c-reply' : '');
-            row.style.marginLeft = Math.min(d, 4) * 16 + 'px';
-            row.style.animationDelay = Math.min(i, 12) * 0.03 + 's';
+            row.className = 'c-item' + (depth > 0 ? ' c-reply' : '');
+            row.style.marginLeft = d * 16 + 'px';
+            row.style.animationDelay = Math.min(seq++, 12) * 0.03 + 's';
 
             const ava = document.createElement('img');
-            ava.className = 'c-ava' + (d > 0 ? ' c-ava-sm' : '');
+            ava.className = 'c-ava' + (depth > 0 ? ' c-ava-sm' : '');
             ava.loading = 'lazy';
             ava.alt = '';
             const pa = p.author && p.author.avatar;
@@ -772,7 +944,16 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
 
             row.appendChild(main);
             cList.appendChild(row);
-        });
+            p.__kids.forEach((k) => renderOne(k, depth + 1));
+        };
+        roots.forEach((p) => renderOne(p, 0));
+
+        if (total > items.length) {
+            const more = document.createElement('div');
+            more.className = 'loading';
+            more.textContent = '仅显示前 ' + items.length + ' 条，共 ' + total + ' 条（可在原帖查看全部）';
+            cList.appendChild(more);
+        }
     }).catch(() => {
         postEl.innerHTML = '<div class="err">读取失败，请稍后再试</div>';
         cList.innerHTML = '<div class="err">读取失败</div>';
@@ -786,6 +967,8 @@ function applyPostPopup(enabled) {
             postPopupClickHandler = null;
         }
         closePostPopup();
+        postPopupDock = [];
+        renderPostPopupDock();
         return;
     }
     if (postPopupClickHandler) return;
@@ -795,7 +978,7 @@ function applyPostPopup(enabled) {
         if (location.pathname.indexOf('/forum/post/') === 0) return;
         const target = ev.target;
         if (!target || !target.closest) return;
-        if (target.closest('#' + POST_POPUP_HOST_ID) || target.closest('#pickcat-settings-host')) return;
+        if (target.closest('#' + POST_POPUP_HOST_ID) || target.closest('#' + POST_POPUP_DOCK_ID) || target.closest('#pickcat-settings-host')) return;
         const art = target.closest('article');
         if (!art) return;
         // 整张卡片都能点开浮窗；只放过卡片内的按钮类控件（点赞、回复、菜单等）
