@@ -706,6 +706,26 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
             .c-body p { margin: 0 0 6px; }
             .c-body img { max-width: 100%; border-radius: 8px; }
             .c-like { margin-top: 4px; font-size: 11px; color: ${dark ? '#93a1b8' : '#98a3b7'}; }
+            .c-more {
+                display: block; margin: 6px 0 12px 10px; padding: 5px 12px;
+                font-size: 11.5px; font-family: inherit; cursor: pointer;
+                color: ${dark ? '#ffb3b0' : '#e14b45'};
+                background: ${dark ? 'rgba(250,50,45,0.14)' : 'rgba(250,50,45,0.07)'};
+                border: 1px solid ${dark ? 'rgba(250,50,45,0.34)' : 'rgba(250,50,45,0.22)'};
+                border-radius: 999px;
+                transition: background 0.25s, transform 0.25s;
+            }
+            .c-more:hover { transform: translateY(-1px); background: ${dark ? 'rgba(250,50,45,0.24)' : 'rgba(250,50,45,0.13)'}; }
+            .c-expand {
+                display: inline-block; margin-top: 2px; padding: 0; border: none; background: none; cursor: pointer;
+                font-family: inherit; font-size: 11.5px; color: ${dark ? '#8ab4ff' : '#3f74d4'};
+            }
+            .c-expand:hover { text-decoration: underline; }
+            .c-body.c-clamp { position: relative; max-height: 118px; overflow: hidden; }
+            .c-body.c-clamp::after {
+                content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 42px; pointer-events: none;
+                background: linear-gradient(180deg, ${dark ? 'rgba(26,32,48,0)' : 'rgba(255,255,255,0)'}, ${dark ? 'rgba(26,32,48,0.96)' : 'rgba(255,255,255,0.96)'});
+            }
             .loading { padding: 40px 20px; text-align: center; font-size: 13px; color: ${dark ? '#a9b6cd' : '#7b879c'}; }
             .err { padding: 40px 20px; text-align: center; font-size: 13px; color: #e05252; }
             .nav-btn {
@@ -886,13 +906,16 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
             return;
         }
         let seq = 0;
-        const renderOne = (p, depth) => {
+        const countKids = (p) => p.__kids.reduce((s, k) => s + 1 + countKids(k), 0);
+        const renderOne = (p, depth, forced, anchor) => {
             p.__kids.sort(byFloor);
             const d = Math.min(depth, 3);
             const row = document.createElement('div');
             row.className = 'c-item' + (depth > 0 ? ' c-reply' : '');
             row.style.marginLeft = d * 16 + 'px';
             row.style.animationDelay = Math.min(seq++, 12) * 0.03 + 's';
+            row.dataset.floor = String(p.postNumber || '');
+            row.dataset.depth = String(depth);
 
             const ava = document.createElement('img');
             ava.className = 'c-ava' + (depth > 0 ? ' c-ava-sm' : '');
@@ -935,6 +958,21 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
             body.appendChild(pickcatSanitizeHtml(p.cookedHtml));
             main.appendChild(body);
 
+            const plainLen = String(body.textContent || '').trim().length;
+            if (plainLen > 180 && !body.querySelector('img')) {
+                body.classList.add('c-clamp');
+                const exp = document.createElement('button');
+                exp.className = 'c-expand';
+                exp.textContent = '展开';
+                exp.addEventListener('click', (ev) => {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const clamped = body.classList.toggle('c-clamp');
+                    exp.textContent = clamped ? '展开' : '收起';
+                });
+                main.appendChild(exp);
+            }
+
             if (p.likeCount) {
                 const like = document.createElement('div');
                 like.className = 'c-like';
@@ -943,10 +981,30 @@ function openPostPopup(topicId, cardRect, cardEl, dir) {
             }
 
             row.appendChild(main);
-            cList.appendChild(row);
-            p.__kids.forEach((k) => renderOne(k, depth + 1));
+            if (anchor && anchor.parentNode === cList) cList.insertBefore(row, anchor.nextSibling);
+            else cList.appendChild(row);
+            let tail = row;
+            const kidTotal = countKids(p);
+            if (!forced && kidTotal > 3) {
+                const fold = document.createElement('button');
+                fold.className = 'c-more';
+                fold.style.marginLeft = (Math.min(depth + 1, 3) * 16 + 10) + 'px';
+                fold.textContent = '展开 ' + kidTotal + ' 条回复';
+                fold.addEventListener('click', () => {
+                    const base = fold.previousElementSibling;
+                    let t = base;
+                    p.__kids.forEach((k) => { t = renderOne(k, depth + 1, true, t); });
+                    fold.remove();
+                });
+                cList.insertBefore(fold, tail.nextSibling);
+                tail = fold;
+            } else {
+                p.__kids.forEach((k) => { tail = renderOne(k, depth + 1, forced, tail); });
+            }
+            return tail;
         };
-        roots.forEach((p) => renderOne(p, 0));
+        let tail0 = null;
+        roots.forEach((p) => { tail0 = renderOne(p, 0, false, tail0); });
 
         if (total > items.length) {
             const more = document.createElement('div');
@@ -1000,6 +1058,237 @@ function applyPostPopup(enabled) {
         openPostPopup(m[1], { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, art);
     };
     window.addEventListener('click', postPopupClickHandler, true);
+}
+
+const BELL_PREVIEW_ID = 'pickcat-bell-preview';
+let bellPreviewWired = false;
+let bellPreviewTimer = null;
+let bellPreviewHideTimer = null;
+let bellPreviewWatch = null;
+
+function bellNotifText(type) {
+    if (type === 'REPLY_CREATED') return '回复了你';
+    if (type === 'POST_LIKED') return '赞了你的帖子';
+    if (type === 'USER_MENTIONED') return '在帖子里提到了你';
+    return '有新消息';
+}
+
+const BELL_ANIM_FRAMES = 12;
+function bellTween(el, from, to, dur, done) {
+    const t0 = Date.now();
+    let finished = false;
+    const apply = (o, y, s) => {
+        el.style.opacity = String(o);
+        el.style.transform = 'translateY(' + y + 'px) scale(' + s + ')';
+    };
+    const finish = () => {
+        if (finished) return;
+        finished = true;
+        apply(to.o, to.y, to.s);
+        if (done) done();
+    };
+    const step = () => {
+        if (finished) return;
+        const k = Math.min(1, (Date.now() - t0) / dur);
+        const e = 1 - Math.pow(1 - k, 3);
+        apply(from.o + (to.o - from.o) * e, from.y + (to.y - from.y) * e, from.s + (to.s - from.s) * e);
+        if (k < 1) setTimeout(step, Math.max(12, Math.round(dur / BELL_ANIM_FRAMES)));
+        else finish();
+    };
+    step();
+    setTimeout(finish, dur + 70);
+}
+
+function removeBellPreview(hard) {
+    const el = document.getElementById(BELL_PREVIEW_ID);
+    if (!el) return;
+    if (hard) { el.remove(); return; }
+    const panel = el.shadowRoot && el.shadowRoot.querySelector('.bell-panel');
+    if (!panel) { el.remove(); return; }
+    if (panel.dataset.leaving === '1') return;
+    panel.dataset.leaving = '1';
+    bellTween(panel, { o: 1, y: 0, s: 1 }, { o: 0, y: -7, s: 0.96 }, 150, () => {
+        if (document.getElementById(BELL_PREVIEW_ID) === el) el.remove();
+    });
+}
+
+function positionBellPreview(host, anchor) {
+    const panel = host.shadowRoot && host.shadowRoot.querySelector('.bell-panel');
+    if (!panel) return;
+    const r = anchor.getBoundingClientRect();
+    const w = panel.offsetWidth || 300;
+    let left = r.right - w;
+    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+    panel.style.left = Math.round(left) + 'px';
+    panel.style.top = Math.round(r.bottom + 8) + 'px';
+}
+
+function showBellPreview(anchor) {
+    removeBellPreview(true);
+    const dark = isDarkMode();
+    const host = document.createElement('div');
+    host.id = BELL_PREVIEW_ID;
+    host.style.cssText = 'position:fixed;left:0;top:0;z-index:2147482900;';
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+        <style>
+            :host { display: block; }
+            .bell-panel {
+                position: fixed; width: 306px; max-height: 336px; overflow: hidden;
+                display: flex; flex-direction: column; border-radius: 16px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+                color: ${dark ? '#f2f6ff' : '#16213a'};
+                background: ${dark ? 'rgba(26,33,50,0.90)' : 'rgba(255,255,255,0.92)'};
+                -webkit-backdrop-filter: blur(26px) saturate(180%); backdrop-filter: blur(26px) saturate(180%);
+                border: 1px solid ${dark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.8)'};
+                box-shadow: 0 18px 46px rgba(12,22,45,0.28), inset 0 1px 0 ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.9)'};
+                opacity: 1; transform: none; transform-origin: top right;
+            }
+            .hd { display: flex; align-items: center; gap: 8px; padding: 11px 14px; font-size: 12.5px; font-weight: 700; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.07)' : 'rgba(15,25,50,0.06)'}; }
+            .dot { width: 7px; height: 7px; border-radius: 50%; background: #fa322d; display: none; }
+            .meta { margin-left: auto; font-size: 11px; font-weight: 500; color: ${dark ? '#93a1b8' : '#8a96ab'}; }
+            .list { overflow: auto; }
+            .row { display: flex; gap: 9px; padding: 9px 13px; cursor: pointer; border-bottom: 1px solid ${dark ? 'rgba(255,255,255,0.05)' : 'rgba(15,25,50,0.04)'}; }
+            .row:hover { background: ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(250,50,45,0.05)'}; }
+            .row:last-child { border-bottom: none; }
+            .ava { width: 28px; height: 28px; border-radius: 50%; flex: 0 0 auto; object-fit: cover; background: rgba(120,130,150,0.22); }
+            .mid { flex: 1; min-width: 0; }
+            .l1 { font-size: 12px; font-weight: 700; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .l2 { font-size: 11.5px; line-height: 1.45; color: ${dark ? '#a9b6cd' : '#66738a'}; margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+            .t { font-size: 10.5px; color: ${dark ? '#8b98ad' : '#96a1b4'}; flex: 0 0 auto; margin-top: 2px; }
+            .unread { width: 6px; height: 6px; border-radius: 50%; background: #fa322d; flex: 0 0 auto; margin-top: 10px; }
+            .ft { padding: 9px 14px; text-align: center; font-size: 11.5px; color: ${dark ? '#93a1b8' : '#8a96ab'}; border-top: 1px solid ${dark ? 'rgba(255,255,255,0.06)' : 'rgba(15,25,50,0.05)'}; }
+        </style>
+        <div class="bell-panel">
+            <div class="hd"><span class="dot"></span><span>消息</span><span class="meta">加载中…</span></div>
+            <div class="list"></div>
+            <div class="ft">点击进入消息中心</div>
+        </div>
+    `;
+    document.documentElement.appendChild(host);
+    const panel = shadow.querySelector('.bell-panel');
+    positionBellPreview(host, anchor);
+    panel.style.opacity = '1';
+    panel.style.transform = 'translateY(-8px) scale(0.96)';
+    bellTween(panel, { o: 1, y: -8, s: 0.96 }, { o: 1, y: 0, s: 1 }, 200);
+
+    panel.addEventListener('click', () => {
+        removeBellPreview(true);
+        location.href = '/notifications';
+    });
+    panel.addEventListener('mouseenter', () => {
+        if (bellPreviewHideTimer) { clearTimeout(bellPreviewHideTimer); bellPreviewHideTimer = null; }
+    });
+    panel.addEventListener('mouseleave', () => {
+        bellPreviewHideTimer = setTimeout(() => removeBellPreview(), 220);
+    });
+
+    fetch('/api/v1/notifications?limit=6', { credentials: 'same-origin' })
+        .then((r) => r.json())
+        .then((data) => {
+            const items = (data && data.items) ? data.items : [];
+            const list = shadow.querySelector('.list');
+            const meta = shadow.querySelector('.meta');
+            if (!list || !host.isConnected) return;
+            const unread = items.filter((i) => !i.readAt).length;
+            const dot = shadow.querySelector('.dot');
+            if (dot) dot.style.display = unread ? 'block' : 'none';
+            meta.textContent = items.length ? (unread ? unread + ' 条未读' : '暂无未读') : '';
+            if (!items.length) {
+                list.innerHTML = '<div style="padding:22px 14px;text-align:center;font-size:12px;">还没有消息</div>';
+                return;
+            }
+            items.forEach((n) => {
+                const d = n.details || {};
+                const actor = d.actor || {};
+                const topic = d.topic || {};
+                const row = document.createElement('div');
+                row.className = 'row';
+                const ava = document.createElement('img');
+                ava.className = 'ava';
+                ava.alt = '';
+                ava.loading = 'lazy';
+                const a = actor.avatar;
+                if (a && a.url) ava.src = pickcatAbsUrl(a.url);
+                else if (a && a.id) ava.src = '/api/v1/avatars/' + a.id;
+                const mid = document.createElement('div');
+                mid.className = 'mid';
+                const l1 = document.createElement('div');
+                l1.className = 'l1';
+                l1.textContent = (actor.username || '有人') + ' ' + bellNotifText(n.type);
+                const l2 = document.createElement('div');
+                l2.className = 'l2';
+                l2.textContent = topic.title || '';
+                mid.appendChild(l1);
+                if (topic.title) mid.appendChild(l2);
+                const t = document.createElement('div');
+                t.className = 't';
+                t.textContent = pickcatFmtTime(n.createdAt).slice(5);
+                row.appendChild(ava);
+                row.appendChild(mid);
+                row.appendChild(t);
+                if (!n.readAt) {
+                    const ud = document.createElement('div');
+                    ud.className = 'unread';
+                    row.appendChild(ud);
+                }
+                row.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    if (topic.id) location.href = '/forum/post/' + topic.id;
+                    else location.href = '/notifications';
+                });
+                list.appendChild(row);
+                const ri = list.children.length - 1;
+                row.style.opacity = '1';
+                row.style.transform = 'translateY(7px)';
+                setTimeout(() => {
+                    if (!row.isConnected) return;
+                    bellTween(row, { o: 1, y: 7, s: 1 }, { o: 1, y: 0, s: 1 }, 180);
+                }, 40 + ri * 34);
+            });
+            positionBellPreview(host, anchor);
+        })
+        .catch(() => {
+            const list = shadow.querySelector('.list');
+            if (list) list.innerHTML = '<div style="padding:22px 14px;text-align:center;font-size:12px;">读取失败</div>';
+        });
+}
+
+function applyBellPreview(enabled) {
+    if (!enabled) {
+        bellPreviewWired = false;
+        if (bellPreviewWatch) { clearInterval(bellPreviewWatch); bellPreviewWatch = null; }
+        if (bellPreviewTimer) { clearTimeout(bellPreviewTimer); bellPreviewTimer = null; }
+        if (bellPreviewHideTimer) { clearTimeout(bellPreviewHideTimer); bellPreviewHideTimer = null; }
+        removeBellPreview(true);
+        return;
+    }
+    if (bellPreviewWired) return;
+    bellPreviewWired = true;
+
+    const wire = () => {
+        if (!bellPreviewWired) return;
+        const bell = document.querySelector('header a[aria-label="消息中心"], header a[href="/notifications"]');
+        if (!bell || bell.dataset.pickcatBell === '1') return;
+        bell.dataset.pickcatBell = '1';
+        bell.addEventListener('mouseenter', () => {
+            if (bellPreviewTimer) clearTimeout(bellPreviewTimer);
+            if (bellPreviewHideTimer) { clearTimeout(bellPreviewHideTimer); bellPreviewHideTimer = null; }
+            bellPreviewTimer = setTimeout(() => {
+                if (bellPreviewWired) showBellPreview(bell);
+            }, 260);
+        });
+        bell.addEventListener('mouseleave', () => {
+            if (bellPreviewTimer) { clearTimeout(bellPreviewTimer); bellPreviewTimer = null; }
+            bellPreviewHideTimer = setTimeout(() => removeBellPreview(), 260);
+        });
+        bell.addEventListener('click', () => {
+            if (bellPreviewTimer) { clearTimeout(bellPreviewTimer); bellPreviewTimer = null; }
+            removeBellPreview();
+        });
+    };
+    wire();
+    bellPreviewWatch = setInterval(wire, 2000);
 }
 
 function applyHideCat(hide) {
@@ -1594,6 +1883,7 @@ const CLAIM_KEY_TYPES = {
     pickcatMaskEnabled: 'bool',
     pickcatGlassSite: 'bool',
     pickcatPostPopup: 'bool',
+    pickcatBellPreview: 'bool',
     pickcatCursor: 'cursor',
     pickcatCustomCursor: 'text',
     pickcatHideCat: 'bool',
@@ -2122,6 +2412,17 @@ function createSettingsPanel() {
                             </label>
                         </div>
 
+                        <div class="row-card">
+                            <div class="row-info">
+                                <div class="row-title">消息悬浮预览</div>
+                                <div class="row-desc">鼠标悬停右上角消息图标时弹出最近消息缩略框，点图标或浮窗直接进入消息中心</div>
+                            </div>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="bellPreviewToggle">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+
                         <div class="section-title" style="margin-top: 12px;">✨ 个性化组件</div>
                         <div class="row-card">
                             <div class="row-info">
@@ -2445,6 +2746,7 @@ function createSettingsPanel() {
     const maskToggle = shadow.getElementById('maskToggle');
     const glassSiteToggle = shadow.getElementById('glassSiteToggle');
     const postPopupToggle = shadow.getElementById('postPopupToggle');
+    const bellPreviewToggle = shadow.getElementById('bellPreviewToggle');
 
     const logoInput = shadow.getElementById('logoInput');
     const saveLogoBtn = shadow.getElementById('saveLogoBtn');
@@ -2555,6 +2857,7 @@ function createSettingsPanel() {
             }
             maskToggle.checked = res.pickcatMaskEnabled === true;
             postPopupToggle.checked = res.pickcatPostPopup !== false;
+            bellPreviewToggle.checked = res.pickcatBellPreview === true;
             hideCatToggle.checked = res.pickcatHideCat === true;
             kitten4Toggle.checked = res.pickcatKitten4 === true;
             categoryListToggle.checked = res.pickcatCategoryList === true;
@@ -2634,6 +2937,7 @@ function createSettingsPanel() {
     maskToggle.addEventListener('change', (e) => saveState('pickcatMaskEnabled', e.target.checked, true));
     glassSiteToggle.addEventListener('change', (e) => saveState('pickcatGlassSite', e.target.checked, true));
     postPopupToggle.addEventListener('change', (e) => saveState('pickcatPostPopup', e.target.checked, true));
+    bellPreviewToggle.addEventListener('change', (e) => saveState('pickcatBellPreview', e.target.checked, true));
     hideCatToggle.addEventListener('change', (e) => saveState('pickcatHideCat', e.target.checked, true));
     kitten4Toggle.addEventListener('change', (e) => saveState('pickcatKitten4', e.target.checked, true));
     categoryListToggle.addEventListener('change', (e) => saveState('pickcatCategoryList', e.target.checked, true));
@@ -2809,7 +3113,7 @@ function createSettingsPanel() {
 // ==========================================
 function loadAllConfigs(callback) {
     chrome.storage.local.get([
-        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup',
+        'pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup', 'pickcatBellPreview',
         'pickcatHideCat', 'pickcatKitten4', 'pickcatCategoryList', 'pickcatCreationGrid', CLAIMS_KEY
     ], (res) => {
         // 插件租约覆盖：只在内存里生效，不碰用户存的原始值
@@ -2827,11 +3131,13 @@ function loadAllConfigs(callback) {
         config.logo = pick('pickcatLogo', res.pickcatLogo || '');
         config.glassSite = pick('pickcatGlassSite', res.pickcatGlassSite === true) === true;
         config.postPopup = pick('pickcatPostPopup', res.pickcatPostPopup !== false) === true;
+        config.bellPreview = pick('pickcatBellPreview', res.pickcatBellPreview === true) === true;
 
         applyBackground(config.bgUrl, config.bgBase64, config.maskEnabled);
         applyLogo(config.logo);
         applyGlassSite(config.glassSite, config.bgUrl, config.bgBase64);
         applyPostPopup(config.postPopup);
+        applyBellPreview(config.bellPreview);
         
         let cursorStyle = pick('pickcatCursor', res.pickcatCursor || 'default'); 
         if (['style4', 'style5'].includes(cursorStyle)) cursorStyle = 'default';
@@ -2919,7 +3225,7 @@ try {
 
 chrome.storage.onChanged.addListener((changes) => {
     if (
-        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || changes.pickcatLogo || changes.pickcatGlassSite || changes.pickcatPostPopup ||
+        changes.pickcatBgUrl || changes.pickcatBgBase64 || changes.pickcatMaskEnabled || changes.pickcatLogo || changes.pickcatGlassSite || changes.pickcatPostPopup || changes.pickcatBellPreview ||
         changes.pickcatCursor || changes.pickcatCustomCursor ||
         changes.pickcatHideCat || changes.pickcatKitten4 || 
         changes.pickcatCategoryList || changes.pickcatCreationGrid
@@ -3037,7 +3343,7 @@ const Workshop = (function () {
     const CATALOG_SOFT_TTL = 10 * 60 * 1000;
     const CATALOG_LOCAL_TTL = 30 * 60 * 1000;
     const REPO_URL = 'https://github.com/lszh2012/Pickcat-Plus';
-    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup'];
+    const APPLY_KEYS = ['pickcatBgUrl', 'pickcatBgBase64', 'pickcatMaskEnabled', 'pickcatCursor', 'pickcatCustomCursor', 'pickcatLogo', 'pickcatGlassSite', 'pickcatPostPopup', 'pickcatBellPreview'];
     const ID_RE = /^[a-z0-9][a-z0-9._-]{1,48}$/;
     const PATH_RE = /^[A-Za-z0-9._\/-]+$/;
     const HOST_RE = /^(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i;
